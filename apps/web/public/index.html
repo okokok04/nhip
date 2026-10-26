@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nhịp — bảng điều khiển trả lương</title>
+    <meta
+      name="description"
+      content="Bảng điều khiển Nhịp: theo dõi hàng đợi payout, gom lô theo ngân sách gas, và trạng thái từng lô trên Arc."
+    />
+    <meta name="color-scheme" content="dark" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true">
+      <span class="aurora__blob aurora__blob--mint"></span>
+      <span class="aurora__blob aurora__blob--violet"></span>
+      <span class="aurora__blob aurora__blob--amber"></span>
+    </div>
+
+    <!-- Cổng vào: chỉ hiện khi chưa có API key -->
+    <section class="gate" id="gate" hidden>
+      <div class="gate__card">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <span class="brand__name">Nhịp</span>
+        </div>
+        <h1 class="gate__title">Kết nối nền tảng của bạn</h1>
+        <p class="gate__lede">
+          Dán API key mà <code>npm run seed</code> in ra. Key được giữ trong
+          <code>localStorage</code> của trình duyệt này, không gửi đi đâu khác.
+        </p>
+        <form class="gate__form" id="gate-form">
+          <label class="field">
+            <span class="field__label">API key</span>
+            <input
+              class="field__input field__input--mono"
+              id="api-key-input"
+              name="apiKey"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="nhip_sk_..."
+              required
+            />
+          </label>
+          <p class="gate__error" id="gate-error" role="alert" aria-live="polite"></p>
+          <button class="btn btn--primary btn--block" type="submit" id="gate-submit">
+            <span>Kết nối</span>
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Bảng điều khiển -->
+    <div class="shell" id="shell" hidden>
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <span class="brand__name">Nhịp</span>
+        </div>
+
+        <div class="topbar__meta">
+          <span class="pill pill--live" id="health-pill">
+            <i class="dot" aria-hidden="true"></i>
+            <span id="health-text">đang kiểm tra</span>
+          </span>
+          <span class="pill pill--ghost" id="platform-pill">—</span>
+          <button class="btn btn--ghost btn--sm" type="button" id="disconnect">Đổi key</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="hero">
+          <div>
+            <p class="eyebrow">Bảng điều khiển vận hành</p>
+            <h1 class="hero__title">
+              Dòng tiền đang chảy<br />
+              <span class="grad">hay đang đứng yên?</span>
+            </h1>
+            <p class="hero__lede">
+              Mọi con số dưới đây đọc trực tiếp từ database. Không có mock, không có
+              số ước lượng.
+            </p>
+          </div>
+
+          <div class="hero__actions">
+            <button class="btn btn--primary" type="button" id="run-batcher">
+              <span class="btn__spinner" aria-hidden="true"></span>
+              <span class="btn__label">Gom lô hàng đợi</span>
+            </button>
+            <button class="btn btn--ghost" type="button" id="refresh">
+              <span class="btn__label">Làm mới</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="kpis" aria-label="Tổng quan">
+          <article class="kpi kpi--queued">
+            <header class="kpi__head">
+              <span class="kpi__label">Đang chờ</span>
+              <span class="kpi__badge">queued</span>
+            </header>
+            <p class="kpi__value" id="kpi-queued-count">—</p>
+            <p class="kpi__sub"><span class="mono" id="kpi-queued-amount">—</span> USDC</p>
+            <div class="kpi__bar"><span style="width: 0%"></span></div>
+          </article>
+
+          <article class="kpi kpi--batched">
+            <header class="kpi__head">
+              <span class="kpi__label">Đã vào lô</span>
+              <span class="kpi__badge">batched</span>
+            </header>
+            <p class="kpi__value" id="kpi-batched-count">—</p>
+            <p class="kpi__sub"><span class="mono" id="kpi-batched-amount">—</span> USDC</p>
+            <div class="kpi__bar"><span style="width: 0%"></span></div>
+          </article>
+
+          <article class="kpi kpi--confirmed">
+            <header class="kpi__head">
+              <span class="kpi__label">Đã trả</span>
+              <span class="kpi__badge">confirmed</span>
+            </header>
+            <p class="kpi__value" id="kpi-confirmed-count">—</p>
+            <p class="kpi__sub"><span class="mono" id="kpi-confirmed-amount">—</span> USDC</p>
+            <div class="kpi__bar"><span style="width: 0%"></span></div>
+          </article>
+
+          <article class="kpi kpi--rate">
+            <header class="kpi__head">
+              <span class="kpi__label">Tỉ lệ thành công</span>
+              <span class="kpi__badge">settled</span>
+            </header>
+            <p class="kpi__value" id="kpi-rate">—</p>
+            <p class="kpi__sub">
+              <span id="kpi-workers">—</span> người · <span id="kpi-batches">—</span> lô
+            </p>
+            <div class="kpi__bar"><span id="kpi-rate-bar" style="width: 0%"></span></div>
+          </article>
+        </section>
+
+        <div class="grid">
+          <section class="panel" aria-labelledby="new-payout-title">
+            <header class="panel__head">
+              <h2 class="panel__title" id="new-payout-title">Trả một người</h2>
+              <p class="panel__hint">Vào hàng đợi ngay, không chờ chain</p>
+            </header>
+
+            <form class="form" id="payout-form">
+              <label class="field">
+                <span class="field__label">Người lao động</span>
+                <select class="field__input" id="worker-select" name="workerId" required>
+                  <option value="">Đang tải…</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="field__label">Số tiền (USDC)</span>
+                <input
+                  class="field__input field__input--mono"
+                  id="amount-input"
+                  name="amount"
+                  inputmode="decimal"
+                  placeholder="1.65075"
+                  autocomplete="off"
+                  required
+                />
+                <span class="field__help" id="amount-help">Tối đa 6 chữ số thập phân.</span>
+              </label>
+
+              <label class="field">
+                <span class="field__label">Tham chiếu <span class="field__opt">không bắt buộc</span></span>
+                <input
+                  class="field__input"
+                  id="reference-input"
+                  name="reference"
+                  placeholder="Đơn #1042"
+                  autocomplete="off"
+                  maxlength="500"
+                />
+              </label>
+
+              <button class="btn btn--primary btn--block" type="submit" id="payout-submit">
+                <span>Đưa vào hàng đợi</span>
+              </button>
+              <p class="form__note">
+                Idempotency-Key được sinh tự động cho mỗi lần bấm. Bấm hai lần sẽ
+                không tạo hai payout.
+              </p>
+            </form>
+          </section>
+
+          <section class="panel panel--wide" aria-labelledby="batches-title">
+            <header class="panel__head">
+              <h2 class="panel__title" id="batches-title">Lô gần đây</h2>
+              <p class="panel__hint">Mỗi lô là một giao dịch sẽ gửi lên Arc</p>
+            </header>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Lô</th>
+                    <th scope="col">Trạng thái</th>
+                    <th scope="col" class="num">Số payout</th>
+                    <th scope="col" class="num">Tổng</th>
+                    <th scope="col">Tạo lúc</th>
+                  </tr>
+                </thead>
+                <tbody id="batches-body">
+                  <tr><td colspan="5" class="empty">Đang tải…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel" aria-labelledby="payouts-title">
+          <header class="panel__head panel__head--row">
+            <div>
+              <h2 class="panel__title" id="payouts-title">Payout gần đây</h2>
+              <p class="panel__hint">Mới nhất trước · phân trang bằng cursor, không OFFSET</p>
+            </div>
+            <button class="btn btn--ghost btn--sm" type="button" id="load-more" hidden>
+              Tải thêm
+            </button>
+          </header>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Payout</th>
+                  <th scope="col">Người nhận</th>
+                  <th scope="col" class="num">Số tiền</th>
+                  <th scope="col">Trạng thái</th>
+                  <th scope="col">Tham chiếu</th>
+                  <th scope="col">Tạo lúc</th>
+                </tr>
+              </thead>
+              <tbody id="payouts-body">
+                <tr><td colspan="6" class="empty">Đang tải…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <footer class="foot">
+          <span>Nhịp · MVP trên Arc</span>
+          <span class="foot__sep">·</span>
+          <span id="foot-note">Gas/payout đang là ước lượng 28.000, chưa đo thật.</span>
+        </footer>
+      </main>
+    </div>
+
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

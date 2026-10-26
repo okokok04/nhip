@@ -1,0 +1,33 @@
+{
+  "name": "nhip",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "imports": {
+    "#core/*": "./packages/core/src/*.ts"
+  },
+  "scripts": {
+    "dev": "node --watch apps/api/src/server.ts",
+    "start": "node apps/api/src/server.ts",
+    "seed": "node scripts/seed.ts",
+    "test": "node --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\" \"apps/**/*.test.js\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "node scripts/lint-guards.mjs",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run team:check",
+    "team:check": "node scripts/team-check.mjs",
+    "team:board": "node scripts/team-board.mjs",
+    "kit:check": "node scripts/check-kit.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.13",
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.10.3",
+    "viem": "^2.57.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
