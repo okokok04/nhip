@@ -5,7 +5,7 @@ import type { Address } from '../../../packages/core/src/address.ts';
 import type { Database } from '../../../packages/db/src/client.ts';
 import { migrate } from '../../../packages/db/src/migrate.ts';
 import { PgliteDatabase } from '../../../packages/db/src/pglite.ts';
-import { findWorkerById, findWorkerByExternalId, upsertWorker } from './workers.repo.ts';
+import { findWorkerById, findWorkerByExternalId, newClaimToken, upsertWorker } from './workers.repo.ts';
 
 const PLATFORM = 'plat_workers_repo';
 const OTHER = 'plat_workers_repo_other';
@@ -106,6 +106,46 @@ describe('upsertWorker', () => {
 
     assert.equal(upper.created, true);
     assert.equal(lower.created, true);
+  });
+});
+
+describe('claim_token — bí mật mở biên nhận công khai', () => {
+  it('tạo worker là có token ngay, đủ dài để không dò được', async () => {
+    const { worker } = await upsertWorker(db, {
+      id: 'wrk_token',
+      platformId: PLATFORM,
+      externalId: 'token-001',
+    });
+
+    assert.ok(worker.claim_token, 'thiếu token nghĩa là không gửi được link biên nhận');
+    assert.match(worker.claim_token, /^[a-f0-9]{48}$/, '48 hex khớp regex của /v1/receipts');
+  });
+
+  it('nhiều lần sinh không trùng nhau', () => {
+    const tokens = new Set([newClaimToken(), newClaimToken(), newClaimToken(), newClaimToken(), newClaimToken()]);
+    assert.equal(tokens.size, 5, 'token trùng nghĩa là người này đọc được biên nhận của người kia');
+  });
+
+  it('cập nhật tên/ví KHÔNG đổi token — link đã gửi phải còn sống', async () => {
+    const first = await upsertWorker(db, {
+      id: 'wrk_token_keep',
+      platformId: PLATFORM,
+      externalId: 'token-002',
+      address: ADDRESS_A,
+    });
+    const before = first.worker.claim_token;
+    assert.ok(before);
+
+    const second = await upsertWorker(db, {
+      id: 'wrk_token_keep_ignored',
+      platformId: PLATFORM,
+      externalId: 'token-002',
+      address: ADDRESS_B,
+      displayName: 'Đổi tên',
+    });
+
+    assert.equal(second.worker.claim_token, before, 'token đổi sau một lần upsert là link chết');
+    assert.equal(second.worker.address, ADDRESS_B, 'địa chỉ vẫn phải được cập nhật');
   });
 });
 

@@ -39,6 +39,12 @@ export interface WorkerBody {
   readonly externalId: string;
   readonly address: string | null;
   readonly displayName: string | null;
+  /**
+   * Token mở biên nhận công khai. Chỉ route **đã xác thực** mới trả về: đây là bí mật
+   * của người lao động, và nền tảng cần nó để gửi link. Không có trường này thì platform
+   * không bao giờ gửi được link cho người nhận, và tính năng biên nhận thành demo-only.
+   */
+  readonly claimToken: string | null;
   readonly created_at: string;
 }
 
@@ -48,6 +54,7 @@ export function toWorkerBody(row: WorkerRow): WorkerBody {
     externalId: row.external_id,
     address: row.address,
     displayName: row.display_name,
+    claimToken: row.claim_token,
     created_at: row.created_at.toISOString(),
   };
 }
@@ -114,7 +121,7 @@ export function createWorkerRoutes(options: RouteOptions): Hono<AppEnv> {
     }
 
     const worker = await db.query<WorkerRow>(
-      `SELECT id, external_id, address, display_name, created_at
+      `SELECT id, external_id, address, display_name, claim_token, created_at
          FROM workers WHERE id = $1 AND platform_id = $2`,
       [c.req.param('id'), platform.id],
     );

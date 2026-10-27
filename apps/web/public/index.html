@@ -80,7 +80,51 @@
           </button>
         </form>
         <div class="gate__foot">
-          <span>Chain ID 5042 · Gas sàn 20 Gwei · USDC 6 decimals</span>
+          <span>Chain ID 5042002 (testnet) · Gas sàn 20 Gwei · USDC 6 decimals</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================
+         TRANG BIÊN NHẬN CÔNG KHAI — `?claim=<token>`
+         Người lao động mở link này, không cần API key và không thấy dashboard.
+         =================================================================== -->
+    <section class="receipt-page" id="receipt-page" hidden>
+      <div class="receipt-card glass">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <span class="brand__name">Nhịp</span>
+          <span class="badge badge--arc">Biên nhận</span>
+        </div>
+
+        <div class="receipt-card__head">
+          <h1 class="receipt-card__name" id="receipt-name">Đang mở biên nhận…</h1>
+          <p class="receipt-card__meta mono" id="receipt-ext-id">—</p>
+          <p class="receipt-card__meta" id="receipt-status" role="status" aria-live="polite">
+            Đang tải…
+          </p>
+        </div>
+
+        <div id="receipt-body" hidden>
+          <div class="receipt-totals">
+            <div class="receipt-total">
+              <span class="receipt-total__label">Đã nhận</span>
+              <span class="receipt-total__val mono" id="receipt-paid">—</span>
+            </div>
+            <div class="receipt-total">
+              <span class="receipt-total__label">Đang chờ</span>
+              <span class="receipt-total__val mono" id="receipt-pending">—</span>
+            </div>
+          </div>
+
+          <h2 class="receipt-card__name" style="font-size: 16px; margin-top: 20px;">Các khoản chi trả</h2>
+          <div class="receipts-list" id="receipt-list"></div>
+
+          <p class="receipt-note" id="receipt-wallet-note">—</p>
+          <p class="receipt-note">
+            Link này là bí mật: ai có link thì xem được biên nhận. Hệ thống không hiển thị
+            địa chỉ ví đầy đủ của bạn ở đây, và không có cách nào tìm biên nhận của người khác.
+          </p>
         </div>
       </div>
     </section>
@@ -106,6 +150,10 @@
           <button class="nav-tab nav-tab--active" type="button" data-tab="tab-overview">
             <span class="nav-tab__icon">📊</span>
             <span>Vận hành & Dòng tiền</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="tab-settlement">
+            <span class="nav-tab__icon">🔗</span>
+            <span>Thanh toán on-chain</span>
           </button>
           <button class="nav-tab" type="button" data-tab="tab-arc">
             <span class="nav-tab__icon">⚡</span>
@@ -325,7 +373,7 @@
               <header class="panel__head panel__head--row">
                 <div>
                   <h2 class="panel__title" id="batches-title">Các lô thanh toán (Batches)</h2>
-                  <p class="panel__sub">Mỗi lô tương ứng một giao dịch trên Arc. Bấm vào lô để xem chi tiết.</p>
+                  <p class="panel__sub">Mỗi payout là một giao dịch USDC riêng. Bấm vào lô để xem hash từng người.</p>
                 </div>
               </header>
 
@@ -389,7 +437,190 @@
         </section>
 
         <!-- ===================================================================
-             TAB 2: MẠNG ARC & GIÁ TRỊ KINH TẾ (cảm hứng oneliq.xyz)
+             TAB 2: THANH TOÁN ON-CHAIN (Settlement Loop thật trên Arc)
+             =================================================================== -->
+        <section class="tab-pane" id="tab-settlement">
+          <div class="section-lead section-lead--left">
+            <span class="badge badge--arc">Arc Settlement Loop</span>
+            <h2 class="section-title">Báo giá → Gửi → Đối soát biên nhận</h2>
+            <p class="section-sub">
+              Đây là bước duy nhất trong hệ thống chuyển tiền thật. Mỗi payout là một giao dịch USDC riêng,
+              ký bởi ví trả tiền của nền tảng. Không có báo giá thì không gửi được — vì trên Arc giao dịch
+              dưới sàn gas sẽ treo vô hạn thay vì báo lỗi.
+            </p>
+          </div>
+
+          <!-- Trạng thái cổng ra chain -->
+          <div class="chain-status glass" id="chain-status">
+            <div class="chain-status__item">
+              <span class="chain-status__label">Mạng</span>
+              <span class="chain-status__val mono" id="chain-network">—</span>
+            </div>
+            <div class="chain-status__item">
+              <span class="chain-status__label">Chain ID</span>
+              <span class="chain-status__val mono" id="chain-id">—</span>
+            </div>
+            <div class="chain-status__item">
+              <span class="chain-status__label">Ví trả tiền (relayer)</span>
+              <span class="chain-status__val mono" id="chain-relayer">—</span>
+            </div>
+            <div class="chain-status__item">
+              <span class="chain-status__label">USDC ERC-20</span>
+              <span class="chain-status__val mono" id="chain-usdc">—</span>
+            </div>
+          </div>
+
+          <div class="panel glass panel--warn" id="chain-unconfigured" hidden>
+            <h3 class="panel__title">Chưa cấu hình ví trả tiền</h3>
+            <p class="panel__sub">
+              Đặt biến môi trường <code>RELAYER_PRIVATE_KEY</code> (khoá riêng 32 byte hex, ví có USDC testnet)
+              rồi khởi động lại API. Hệ thống sẽ không gửi, và cũng không giả vờ đã gửi.
+            </p>
+          </div>
+
+          <div class="grid-2col">
+            <!-- Bước 1 & 2: chọn lô, báo giá -->
+            <section class="panel glass" aria-labelledby="settle-quote-title">
+              <header class="panel__head">
+                <div>
+                  <h2 class="panel__title" id="settle-quote-title">1 · Chọn lô và báo giá</h2>
+                  <p class="panel__sub">Báo giá là bắt buộc và chỉ có hiệu lực 5 phút</p>
+                </div>
+              </header>
+
+              <div class="form">
+                <label class="field">
+                  <span class="field__label">Lô đang chờ gửi (state = planned)</span>
+                  <select class="field__input field__input--mono" id="settle-batch-select">
+                    <option value="">Đang tải danh sách lô…</option>
+                  </select>
+                  <span class="field__help" id="settle-batch-help">
+                    Lô tạo từ tab Vận hành hoặc tab Chia lô sẽ xuất hiện ở đây sau khi tải lại.
+                  </span>
+                </label>
+
+                <div class="settle-actions">
+                  <button class="btn btn--secondary" type="button" id="settle-quote-btn">
+                    <span class="btn__spinner" aria-hidden="true"></span>
+                    <span class="btn__label">Báo giá phí</span>
+                  </button>
+                  <button class="btn btn--ghost" type="button" id="settle-reload-btn">
+                    <span class="btn__label">Tải lại danh sách lô</span>
+                  </button>
+                </div>
+
+                <div class="quote-box" id="quote-box" hidden>
+                  <div class="quote-grid">
+                    <div class="quote-item">
+                      <span class="quote-item__k">Số payout gửi được</span>
+                      <span class="quote-item__v mono" id="quote-count">—</span>
+                    </div>
+                    <div class="quote-item">
+                      <span class="quote-item__k">Tổng tiền</span>
+                      <span class="quote-item__v mono" id="quote-total">—</span>
+                    </div>
+                    <div class="quote-item">
+                      <span class="quote-item__k">Gas / transfer</span>
+                      <span class="quote-item__v mono" id="quote-gas-per">—</span>
+                    </div>
+                    <div class="quote-item">
+                      <span class="quote-item__k">Tổng gas lô</span>
+                      <span class="quote-item__v mono" id="quote-gas">—</span>
+                    </div>
+                    <div class="quote-item">
+                      <span class="quote-item__k">maxFeePerGas</span>
+                      <span class="quote-item__v mono" id="quote-fee-gas">—</span>
+                    </div>
+                    <div class="quote-item">
+                      <span class="quote-item__k">Trần phí (USDC)</span>
+                      <span class="quote-item__v mono" id="quote-fee">—</span>
+                    </div>
+                    <div class="quote-item">
+                      <span class="quote-item__k">Số dư relayer</span>
+                      <span class="quote-item__v mono" id="quote-balance">—</span>
+                    </div>
+                    <div class="quote-item">
+                      <span class="quote-item__k">Nguồn gas</span>
+                      <span class="quote-item__v mono" id="quote-source">—</span>
+                    </div>
+                  </div>
+
+                  <p class="quote-verdict" id="quote-verdict">—</p>
+
+                  <button class="btn btn--primary btn--block btn--lg" type="button" id="settle-submit-btn" disabled>
+                    <span class="btn__label">Gửi lên Arc</span>
+                  </button>
+                  <p class="form__note">
+                    Gửi là không thể hoàn tác. Hệ thống trả về ngay khi transaction đã broadcast, không chờ block.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <!-- Bước 3: đối soát -->
+            <section class="panel glass" aria-labelledby="settle-confirm-title">
+              <header class="panel__head">
+                <div>
+                  <h2 class="panel__title" id="settle-confirm-title">2 · Đối soát biên nhận</h2>
+                  <p class="panel__sub">Đọc receipt từ Arc và ghi kết quả thật vào DB</p>
+                </div>
+              </header>
+
+              <div class="settle-summary">
+                <div class="summary-metric">
+                  <span class="summary-metric__label">Đã xác nhận</span>
+                  <span class="summary-metric__val mono" id="settle-confirmed">—</span>
+                </div>
+                <div class="summary-metric">
+                  <span class="summary-metric__label">Đang chờ chain</span>
+                  <span class="summary-metric__val mono" id="settle-pending">—</span>
+                </div>
+                <div class="summary-metric">
+                  <span class="summary-metric__label">Thất bại</span>
+                  <span class="summary-metric__val mono" id="settle-failed">—</span>
+                </div>
+              </div>
+
+              <button class="btn btn--secondary btn--block" type="button" id="settle-confirm-btn" disabled>
+                <span class="btn__label">Đọc receipt từ Arc</span>
+              </button>
+              <p class="form__note" id="settle-confirm-hint">
+                Nút này chỉ đọc chain, không gửi gì. Bấm nhiều lần không gây trả trùng.
+              </p>
+            </section>
+          </div>
+
+          <!-- Bảng payout của lô đang chọn -->
+          <section class="panel glass" style="margin-top: 24px;" aria-labelledby="settle-payouts-title">
+            <header class="panel__head panel__head--row">
+              <div>
+                <h3 class="panel__title" id="settle-payouts-title">Chi tiết từng khoản trong lô</h3>
+                <p class="panel__sub" id="settle-payouts-sub">Chọn một lô để xem dấu vết on-chain của từng người</p>
+              </div>
+              <span class="pill pill--ghost mono" id="settle-mode-pill">—</span>
+            </header>
+
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Mã payout</th>
+                    <th scope="col" class="num">Số tiền (USDC)</th>
+                    <th scope="col">Trạng thái</th>
+                    <th scope="col">Tx hash</th>
+                    <th scope="col" class="num">Block / Gas</th>
+                  </tr>
+                </thead>
+                <tbody id="settle-payouts-body">
+                  <tr><td colspan="5" class="empty">Chưa chọn lô. Hãy chọn một lô ở trên rồi bấm "Báo giá phí".</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- ===================================================================
+             TAB 3: MẠNG ARC & GIÁ TRỊ KINH TẾ (cảm hứng oneliq.xyz)
              =================================================================== -->
         <section class="tab-pane" id="tab-arc">
           <div class="section-lead">
@@ -415,21 +646,21 @@
 
             <div class="bento-card glass bento-card--arc">
               <div class="bento-card__badge badge--arc">Arc Network (Circle L1)</div>
-              <div class="bento-card__num mono grad">~$3,00</div>
+              <div class="bento-card__num mono grad">~$7,50</div>
               <div class="bento-card__label">Chi phí gas cho 5.000 payout / ngày</div>
               <p class="bento-card__desc">
-                Chỉ ~$0.0006 mỗi payout nhờ kiến trúc gom lô (Batching) và sàn gas 20 Gwei trên Arc.
-                Chi phí chỉ chiếm <strong>0,1%</strong> đơn hàng, tiền về ví người lao động trong tích tắc.
+                Đo thật trên Arc Testnet: 74.826 gas cho một transfer tới ví lạnh, tại sàn 20 Gwei
+                = 0,00149652 USDC mỗi payout. Chi phí vẫn dưới <strong>0,3%</strong> một đơn 0,6 USDC.
               </p>
             </div>
 
             <div class="bento-card glass bento-card--save">
               <div class="bento-card__badge">Tiết kiệm ròng</div>
-              <div class="bento-card__num mono" style="color: var(--arc-mint)">99,98%</div>
-              <div class="bento-card__label">Lợi thế kinh tế tuyệt đối</div>
+              <div class="bento-card__num mono" style="color: var(--arc-mint)">~99,94%</div>
+              <div class="bento-card__label">So với Ethereum L1 (giả định ~$2,52/lần)</div>
               <p class="bento-card__desc">
-                Doanh nghiệp gig giữ được toàn bộ biên lợi nhuận, người lao động nhận tiền tức thì
-                ngay khi hoàn thành cuốc xe hoặc ca làm.
+                Con số này là so sánh với giả định phí Ethereum L1, không phải số đo trên Arc.
+                Phần chắc chắn: trên Arc chi phí một payout là 0,0015 USDC, đã đo.
               </p>
             </div>
           </div>
@@ -508,7 +739,7 @@
               </div>
               <div class="spec-item">
                 <span class="spec-item__k">Ngân sách Gas Lô (gasBudget)</span>
-                <span class="spec-item__v mono">10.000.000 gas (~350 tx/lô)</span>
+                <span class="spec-item__v mono">10.000.000 gas → 133 payout/lô</span>
               </div>
               <div class="spec-item">
                 <span class="spec-item__k">Tốc độ xác thực</span>
@@ -678,6 +909,9 @@
                     <!-- Dynamic receipts rendered here -->
                   </div>
                 </div>
+
+                <!-- Link công khai để gửi cho người lao động (Zalo / SMS) -->
+                <div class="portal-receipts-wrap" id="lookup-claim-link"></div>
               </div>
             </div>
 
@@ -874,6 +1108,10 @@
           <button class="cmd-item" type="button" data-cmd="tab-overview">
             <span class="cmd-item__icon">📊</span>
             <span class="cmd-item__label">Vận hành & Dòng tiền</span>
+          </button>
+          <button class="cmd-item" type="button" data-cmd="tab-settlement">
+            <span class="cmd-item__icon">🔗</span>
+            <span class="cmd-item__label">Thanh toán on-chain (báo giá → gửi → đối soát)</span>
           </button>
           <button class="cmd-item" type="button" data-cmd="tab-arc">
             <span class="cmd-item__icon">⚡</span>

@@ -419,8 +419,8 @@ describe('POST /v1/batches', () => {
   });
 
   it('nhiều payout vượt trần lô → chia nhiều lô, tổng tiền bảo toàn', async () => {
-    // gas_budget mặc định 10.000.000, gas 28.000/payout → 357 payout/lô.
-    const count = 400;
+    // gas_budget mặc định 10.000.000, gas 75.000/payout (cận trên đo trên Arc) → 133 payout/lô.
+    const count = 300;
     const payouts = Array.from({ length: count }, (_, index) => ({
       workerId: w1,
       amount_micro: String(1_000_000 + index),
@@ -434,7 +434,7 @@ describe('POST /v1/batches', () => {
     assert.equal(res.status, 202);
     const body = (await res.json()) as { batches: { id: string; payoutCount: number; total_micro: string }[] };
 
-    assert.ok(body.batches.length >= 2, `400 payout phải chia ít nhất 2 lô, nhận ${body.batches.length}`);
+    assert.ok(body.batches.length >= 3, `300 payout phải chia ít nhất 3 lô, nhận ${body.batches.length}`);
 
     const totalPayouts = body.batches.reduce((acc, batch) => acc + batch.payoutCount, 0);
     assert.equal(totalPayouts, count, 'không payout nào bị mất hoặc nhân đôi');
@@ -443,7 +443,7 @@ describe('POST /v1/batches', () => {
     assert.equal(sumMicro, expected, 'tổng tiền phải bảo toàn');
 
     for (const batch of body.batches) {
-      assert.ok(batch.payoutCount <= 357, `lô ${batch.id} vượt trần gas: ${batch.payoutCount} payout`);
+      assert.ok(batch.payoutCount <= 133, `lô ${batch.id} vượt trần gas: ${batch.payoutCount} payout`);
     }
   });
 });

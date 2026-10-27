@@ -195,10 +195,107 @@ describe('ràng buộc do DB thi hành, không do code', () => {
     );
   });
 
-  it('cả ba migration đã được áp dụng, đúng thứ tự', async () => {
+  it('cả bốn migration đã được áp dụng, đúng thứ tự', async () => {
     const result = await db.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version');
     const versions = result.rows.map((row) => row.version);
-    assert.deepEqual(versions, ['001_init.sql', '002_batch_idempotency.sql', '003_batch_request_key.sql']);
+    assert.deepEqual(versions, [
+      '001_init.sql',
+      '002_batch_idempotency.sql',
+      '003_batch_request_key.sql',
+      '004_settlement.sql',
+    ]);
+  });
+
+  it('migration 004: lô simulated KHÔNG được mang tx_hash', async () => {
+    // Đây là toàn bộ ý nghĩa của nhãn: dữ liệu demo không bao giờ trông như đã lên chain.
+    const platformId = await seedPlatform('plat_sim_hash');
+
+    await assert.rejects(
+      db.query(
+        `INSERT INTO batches
+           (id, platform_id, state, payout_count, total_micro, estimated_gas,
+            idempotency_key, settlement_mode, tx_hash)
+         VALUES ($1, $2, 'confirmed', 1, '1000000', '75000', $3, 'simulated', $4)`,
+        ['bat_sim_hash', platformId, 'idem_sim_hash', `0x${'ab'.repeat(32)}`],
+      ),
+      (error: unknown) => {
+        assert.ok(isPgError(error, PgErrorCode.CHECK_VIOLATION), `mong đợi 23514, nhận ${String(error)}`);
+        return true;
+      },
+    );
+  });
+
+  it('migration 004: báo giá phải đủ bộ — nửa báo giá bị từ chối', async () => {
+    const platformId = await seedPlatform('plat_partial_quote');
+    await db.query(
+      `INSERT INTO batches (id, platform_id, payout_count, total_micro, estimated_gas, idempotency_key)
+       VALUES ($1, $2, 1, '1000000', '75000', $3)`,
+      ['bat_partial_quote', platformId, 'idem_partial_quote'],
+    );
+
+    await assert.rejects(
+      db.query(`UPDATE batches SET quoted_gas = 75000 WHERE id = $1`, ['bat_partial_quote']),
+      (error: unknown) => {
+        assert.ok(isPgError(error, PgErrorCode.CHECK_VIOLATION), 'chỉ có gas mà thiếu giá/phí/thời điểm');
+        return true;
+      },
+    );
+
+    // Đủ bộ thì hợp lệ.
+    await db.query(
+      `UPDATE batches
+          SET quoted_gas = 75000, quoted_gas_price_wei = '25000000000',
+              quoted_fee_wei = '1875000000000000', quoted_at = now()
+        WHERE id = $1`,
+      ['bat_partial_quote'],
+    );
+  });
+
+  it('migration 004: payout confirmed phải có tx_hash, trừ khi lô của nó là simulated', async () => {
+    const platformId = await seedPlatform('plat_tx_evidence');
+    const workerId = await seedWorker(platformId, 'wrk_tx_evidence');
+
+    await db.query(
+      `INSERT INTO batches
+         (id, platform_id, payout_count, total_micro, estimated_gas, idempotency_key, settlement_mode)
+       VALUES ($1, $2, 1, '1000000', '75000', $3, 'unsettled')`,
+      ['bat_tx_evidence', platformId, 'idem_bat_tx_evidence'],
+    );
+    await db.query(
+      `INSERT INTO payouts (id, platform_id, worker_id, batch_id, amount_micro, idempotency_key, state)
+       VALUES ($1, $2, $3, $4, '1000000', $5, 'batched')`,
+      ['pay_tx_evidence', platformId, workerId, 'bat_tx_evidence', 'idem_pay_tx_evidence'],
+    );
+
+    // Không có bằng chứng thì không được gọi là đã trả.
+    await assert.rejects(
+      db.query(`UPDATE payouts SET state = 'confirmed' WHERE id = $1`, ['pay_tx_evidence']),
+      (error: unknown) => {
+        assert.ok(isPgError(error, PgErrorCode.CHECK_VIOLATION), `mong đợi 23514, nhận ${String(error)}`);
+        return true;
+      },
+    );
+
+    // Có hash thì hợp lệ.
+    await db.query(`UPDATE payouts SET state = 'confirmed', tx_hash = $2 WHERE id = $1`, [
+      'pay_tx_evidence',
+      `0x${'cd'.repeat(32)}`,
+    ]);
+
+    // Dữ liệu demo được miễn: nó không tuyên bố đã lên chain.
+    await db.query(`UPDATE batches SET settlement_mode = 'simulated' WHERE id = $1`, [
+      'bat_tx_evidence',
+    ]);
+    await db.query(`UPDATE payouts SET state = 'confirmed', tx_hash = NULL WHERE id = $1`, [
+      'pay_tx_evidence',
+    ]);
+
+    const row = await db.query<{ state: string; tx_hash: string | null }>(
+      `SELECT state, tx_hash FROM payouts WHERE id = $1`,
+      ['pay_tx_evidence'],
+    );
+    assert.equal(row.rows[0]?.state, 'confirmed');
+    assert.equal(row.rows[0]?.tx_hash, null);
   });
 
   it('migration 003: từ chối hai lô cùng (request_key, chunk_index)', async () => {

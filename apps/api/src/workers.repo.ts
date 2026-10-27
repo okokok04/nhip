@@ -14,6 +14,8 @@
  * không tự kiểm tra trùng trước khi insert, vì kiểm-tra-rồi-insert có cửa sổ race.
  */
 
+import { randomBytes } from 'node:crypto';
+
 import type { Database } from '../../../packages/db/src/client.ts';
 import type { Address } from '../../../packages/core/src/address.ts';
 
@@ -30,6 +32,11 @@ export interface WorkerRow {
   readonly external_id: string;
   readonly address: string | null;
   readonly display_name: string | null;
+  /**
+   * Bí mật mở biên nhận công khai (`?claim=<token>`). `null` với bản ghi cũ chưa
+   * từng được upsert lại sau khi tính năng này ra đời.
+   */
+  readonly claim_token: string | null;
   readonly created_at: Date;
 }
 
@@ -39,7 +46,21 @@ export interface UpsertWorkerResult {
   readonly created: boolean;
 }
 
-const SELECT_COLUMNS = 'id, external_id, address, display_name, created_at';
+const SELECT_COLUMNS = 'id, external_id, address, display_name, claim_token, created_at';
+
+/**
+ * Token mở biên nhận: 24 byte ngẫu nhiên → 48 ký tự hex.
+ *
+ * Vì sao 24 byte: token là **toàn bộ** lớp bảo vệ của một trang public chứa thu nhập
+ * của một người. 6 ký tự thì dò được; 24 byte (192 bit) thì không. Định dạng hex khớp
+ * regex mà `/v1/receipts/:claimToken` chấp nhận.
+ *
+ * Vì sao sinh ở đây chứ không ở SQL: `random()` của Postgres không phải nguồn ngẫu
+ * nhiên mật mã, và `pgcrypto` không có trên mọi nền tảng (PGlite).
+ */
+export function newClaimToken(): string {
+  return randomBytes(24).toString('hex');
+}
 
 /**
  * Upsert theo `(platform_id, external_id)`.
@@ -55,11 +76,12 @@ const SELECT_COLUMNS = 'id, external_id, address, display_name, created_at';
  */
 export async function upsertWorker(db: Database, input: WorkerInput): Promise<UpsertWorkerResult> {
   const result = await db.query<WorkerRow & { inserted: boolean }>(
-    `INSERT INTO workers (id, platform_id, external_id, address, display_name)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO workers (id, platform_id, external_id, address, display_name, claim_token)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (platform_id, external_id) DO UPDATE
        SET address      = COALESCE(EXCLUDED.address, workers.address),
-           display_name = COALESCE(EXCLUDED.display_name, workers.display_name)
+           display_name = COALESCE(EXCLUDED.display_name, workers.display_name),
+           claim_token  = COALESCE(workers.claim_token, EXCLUDED.claim_token)
      RETURNING ${SELECT_COLUMNS}, (xmax = 0) AS inserted`,
     [
       input.id,
@@ -67,6 +89,7 @@ export async function upsertWorker(db: Database, input: WorkerInput): Promise<Up
       input.externalId,
       input.address ?? null,
       input.displayName ?? null,
+      newClaimToken(),
     ],
   );
 

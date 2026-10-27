@@ -71,6 +71,7 @@ export function toBatchBody(row: BatchRow) {
     estimatedGas: row.estimated_gas,
     chunkIndex: row.chunk_index,
     txHash: row.tx_hash,
+    settlementMode: row.settlement_mode,
     created_at: row.created_at.toISOString(),
   };
 }

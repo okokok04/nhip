@@ -9,6 +9,14 @@ export interface Platform {
   readonly batchSize: number;
   readonly batchIntervalMs: number;
   readonly gasBudget: bigint;
+  /**
+   * `true` = nền tảng demo: dữ liệu mẫu, không phải khách thật.
+   *
+   * Đọc từ DB chứ không suy ra từ tên API key. Cách cũ (`key.includes('seed')`) có hai
+   * lỗi: một khách thật đặt key chứa "seed" bị gắn nhãn demo, và một bản sao của môi
+   * trường demo không có nhãn nào — cả hai đều khiến màn hình nói sai sự thật.
+   */
+  readonly isDemo: boolean;
 }
 
 interface PlatformRow {
@@ -17,6 +25,7 @@ interface PlatformRow {
   batch_size: number;
   batch_interval_ms: number;
   gas_budget: string;
+  is_demo: boolean;
 }
 
 /**
@@ -57,7 +66,7 @@ export async function authenticate(db: Database, authorizationHeader: string | n
   }
 
   const result = await db.query<PlatformRow>(
-    `SELECT id, name, batch_size, batch_interval_ms, gas_budget
+    `SELECT id, name, batch_size, batch_interval_ms, gas_budget, is_demo
        FROM platforms WHERE api_key_hash = $1`,
     [hashApiKey(key)],
   );
@@ -74,5 +83,6 @@ export async function authenticate(db: Database, authorizationHeader: string | n
     batchSize: row.batch_size,
     batchIntervalMs: row.batch_interval_ms,
     gasBudget: BigInt(row.gas_budget),
+    isDemo: row.is_demo,
   };
 }

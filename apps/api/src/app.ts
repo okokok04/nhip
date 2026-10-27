@@ -4,11 +4,14 @@ import { Hono } from 'hono';
 import type { Database } from '../../../packages/db/src/client.ts';
 import { authenticate } from './auth.ts';
 import { createBatchRoutes } from './batches.route.ts';
+import type { ChainGateway } from './chain.ts';
 import type { AppEnv } from './context.ts';
 import { AppError, ErrorCode, toAppError } from './errors.ts';
 import { GAS_PER_PAYOUT_ESTIMATE } from './gas.ts';
 import { createOverviewRoutes } from './overview.route.ts';
 import { createPayoutRoutes } from './payouts.route.ts';
+import { createReceiptRoutes } from './receipts.route.ts';
+import { createSettlementRoutes } from './settlement.route.ts';
 import { createWorkerRoutes } from './workers.route.ts';
 
 export interface AppOptions {
@@ -20,6 +23,11 @@ export interface AppOptions {
    * test và cho trường hợp chạy API sau reverse proxy đã lo phần giao diện.
    */
   readonly webRoot?: string;
+  /**
+   * Cổng ra Arc. `null`/bỏ trống = chưa cấu hình ví trả tiền, và API phải nói đúng
+   * như vậy thay vì giả định đã gửi được.
+   */
+  readonly chain?: ChainGateway | null;
 }
 
 const defaultRequestId = () => `req_${crypto.randomUUID()}`;
@@ -77,7 +85,15 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
     );
   });
 
-  // Ranh giới xác thực: mọi route /v1/* đều phải qua đây, kể cả route được mount
+  // Biên nhận là route public **duy nhất** dưới `/v1`, nên nó phải được đăng ký TRƯỚC
+  // middleware xác thực: Hono áp middleware theo thứ tự đăng ký, và đặt sau nghĩa là mọi
+  // request của người lao động nhận 401 — đúng thứ route này sinh ra để tránh.
+  //
+  // Đổi lại, nó chỉ đọc dữ liệu của đúng người sở hữu token, không trả địa chỉ ví, và
+  // không có cách nào liệt kê.
+  app.route('/v1/receipts', createReceiptRoutes({ db }));
+
+  // Ranh giới xác thực: mọi route /v1/* còn lại đều phải qua đây, kể cả route được mount
   // sau này. Middleware đặt trước khi mount nên không có đường vòng.
   app.use('/v1/*', async (c, next) => {
     const platform = await authenticate(db, c.req.header('authorization') ?? null);
@@ -87,15 +103,28 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.get('/v1/me', (c) => {
     const platform = c.get('platform');
+    const chain = options.chain ?? null;
     return c.json({
       id: platform.id,
       name: platform.name,
+      /** Nhãn demo đến từ DB (`platforms.is_demo`), không suy ra từ tên API key. */
+      isDemo: platform.isDemo,
       batchSize: platform.batchSize,
       batchIntervalMs: platform.batchIntervalMs,
       gasBudget: platform.gasBudget.toString(),
       // Số payout tối đa mỗi lô với ngân sách gas hiện tại — client cần biết để
       // không phải đoán tại sao 400 payout thành 2 lô.
       maxPayoutsPerBatch: Number(platform.gasBudget / GAS_PER_PAYOUT_ESTIMATE),
+      // Một nút "Gửi" sáng lên khi không có khoá là lỗi tệ nhất của màn hình này.
+      chain: chain
+        ? {
+            configured: true,
+            network: chain.network,
+            chainId: chain.chainId,
+            relayerAddress: chain.relayerAddress,
+            usdcAddress: chain.usdcAddress,
+          }
+        : { configured: false },
     });
   });
 
@@ -103,6 +132,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   app.route('/v1/batches', createBatchRoutes({ db }));
   app.route('/v1/workers', createWorkerRoutes({ db }));
   app.route('/v1/overview', createOverviewRoutes({ db }));
+  app.route('/v1/settlement', createSettlementRoutes({ db, chain: options.chain ?? null }));
 
   // Dashboard tĩnh phục vụ cùng origin với API: không CORS, không cookie chéo
   // site, và API key trong `localStorage` chỉ thuộc một origin.

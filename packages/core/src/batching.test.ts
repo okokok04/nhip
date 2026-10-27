@@ -13,8 +13,9 @@ interface Payout {
 const payouts = (count: number, each = 1_000_000): Payout[] =>
   Array.from({ length: count }, (_, index) => ({ id: index, amount_micro: micro(BigInt(each)) }));
 
-const OPTS = { gasBudget: 10_000_000n, gasPerPayout: 28_000n, maxBatchSize: 500 };
-// 10_000_000 / 28_000 = 357 (làm tròn xuống)
+// Gas 75.000/payout là cận trên đo được trên Arc Testnet cho ví lạnh (74.826).
+// 10_000_000 / 75_000 = 133 (làm tròn xuống).
+const OPTS = { gasBudget: 10_000_000n, gasPerPayout: 75_000n, maxBatchSize: 500 };
 
 describe('planBatches', () => {
   it('danh sách rỗng → không lô nào', () => {
@@ -32,8 +33,8 @@ describe('planBatches', () => {
 
   it('giới hạn bởi gas, không phải maxBatchSize khi gas là ràng buộc', () => {
     const result = planBatches(payouts(1000), OPTS);
-    assert.equal(result.batches[0]?.length, 357);
-    assert.equal(result.batches.length, 3); // 357 + 357 + 286
+    assert.equal(result.batches[0]?.length, 133);
+    assert.equal(result.batches.length, 8); // 7 lô 133 + 1 lô 69
   });
 
   it('giới hạn bởi maxBatchSize khi nó nhỏ hơn', () => {

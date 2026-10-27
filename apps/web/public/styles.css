@@ -886,6 +886,14 @@ html.light .icon-moon { display: block; }
 .status-pill--confirmed { background: rgba(123, 228, 149, 0.12); color: var(--arc-mint); }
 .status-pill--failed { background: rgba(251, 113, 133, 0.12); color: var(--arc-rose); }
 
+/* Trạng thái của settlement — mỗi màu nói một mức độ khác nhau, không phải trang trí.
+   `unknown` cố ý khác hẳn `failed`: nó không phải lỗi, nó là "phải đối soát bằng tay". */
+.status-pill--planned { background: rgba(148, 163, 184, 0.14); color: var(--text-sub); }
+.status-pill--submitting { background: rgba(77, 214, 219, 0.14); color: var(--arc-teal); }
+.status-pill--submitted { background: rgba(77, 214, 219, 0.14); color: var(--arc-teal); }
+.status-pill--partial { background: rgba(244, 200, 154, 0.16); color: var(--arc-peach); }
+.status-pill--unknown { background: rgba(167, 139, 250, 0.16); color: var(--arc-purple); }
+
 /* Table Filters */
 .filter-group {
   display: flex;
@@ -1713,5 +1721,333 @@ html.light .icon-moon { display: block; }
 .chip-lookup:active,
 .btn-chip:active {
   transform: translateY(0);
+}
+
+/* --------------------------------------------------------------------------
+   19. INTERACTION STATES (DESIGN.md §6.4: đủ 5 trạng thái) + FOCUS VISIBLE
+   -------------------------------------------------------------------------- */
+
+/* Trước đây không có rule :disabled nào, nên nút bị khoá vẫn trông như bấm được.
+   Với một nút gửi tiền thật, đó là lỗi an toàn chứ không phải lỗi thẩm mỹ. */
+.btn:disabled,
+.btn[disabled],
+.chip-add:disabled,
+.filter-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+  box-shadow: none;
+  filter: saturate(0.6);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+:where(.btn, .btn-icon, .btn-chip, .chip-add, .chip-driver-select, .chip-lookup, .nav-tab, .filter-btn, .cmd-item):focus-visible,
+.field__input:focus-visible,
+.bulk-textarea:focus-visible,
+.calc-slider:focus-visible {
+  outline: 2px solid var(--arc-teal);
+  outline-offset: 2px;
+}
+
+/* Spinner nội tuyến trên nút: chỉ hiện khi nút đang ở trạng thái bận. */
+.btn__spinner {
+  display: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+
+.btn.is-busy .btn__spinner {
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   20. SETTLEMENT LOOP (báo giá → gửi → đối soát)
+   -------------------------------------------------------------------------- */
+.section-lead--left {
+  text-align: left;
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.chain-status {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  margin-bottom: 20px;
+  background: var(--border);
+}
+
+.chain-status__item {
+  background: var(--bg-card);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.chain-status__label {
+  font-size: 11px;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chain-status__val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel--warn {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.06);
+  margin-bottom: 20px;
+}
+
+.panel--warn code {
+  font-family: var(--mono);
+  color: var(--arc-amber);
+  font-size: 12.5px;
+}
+
+.settle-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quote-box {
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.quote-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.quote-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quote-item__k {
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+.quote-item__v {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.quote-verdict {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+}
+
+.quote-verdict--ok {
+  color: var(--arc-mint);
+  border-color: rgba(123, 228, 149, 0.35);
+  background: rgba(123, 228, 149, 0.08);
+}
+
+.quote-verdict--short {
+  color: var(--arc-rose);
+  border-color: rgba(251, 113, 133, 0.35);
+  background: rgba(251, 113, 133, 0.08);
+}
+
+.quote-verdict--unknown {
+  color: var(--arc-amber);
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.settle-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tx-link {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--arc-teal);
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+  overflow-wrap: anywhere;
+}
+
+.tx-link:hover {
+  color: var(--arc-mint);
+}
+
+.demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono);
+  color: var(--arc-amber);
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+/* --------------------------------------------------------------------------
+   21. PUBLIC RECEIPT VIEW (?claim=<token>) — người lao động, không có API key
+   -------------------------------------------------------------------------- */
+.receipt-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+  position: relative;
+  z-index: 2;
+}
+
+.receipt-card {
+  width: min(560px, 100%);
+  border-radius: var(--r-xl);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.receipt-card__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.receipt-card__name {
+  font-family: var(--display);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.receipt-card__meta {
+  font-size: 12.5px;
+  color: var(--text-sub);
+}
+
+.receipt-totals {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.receipt-total {
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px 16px;
+}
+
+.receipt-total__label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-mute);
+  margin-bottom: 3px;
+}
+
+.receipt-total__val {
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.receipt-note {
+  font-size: 12px;
+  color: var(--text-mute);
+  line-height: 1.55;
+}
+
+@media (max-width: 1024px) {
+  .chain-status { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .chain-status { grid-template-columns: 1fr; }
+  .quote-grid { grid-template-columns: 1fr; }
+  .settle-summary { grid-template-columns: 1fr; }
+  .receipt-totals { grid-template-columns: 1fr; }
+  /* Vùng bấm ≥ 44px trên thiết bị cảm ứng (DESIGN.md §6.10). */
+  .btn,
+  .btn-chip,
+  .chip-add,
+  .chip-driver-select,
+  .chip-lookup,
+  .nav-tab,
+  .filter-btn {
+    min-height: 44px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   22. LINK BIÊN NHẬN TRONG CỔNG TRA CỨU
+   -------------------------------------------------------------------------- */
+#lookup-claim-link {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+#lookup-claim-link code {
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  /* Token 48 ký tự không có khoảng trắng: không có dòng này thì nó tràn khung. */
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 

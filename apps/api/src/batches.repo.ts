@@ -30,12 +30,15 @@ export interface BatchRow {
   readonly request_hash: string | null;
   readonly chunk_index: number;
   readonly tx_hash: string | null;
+  /** `unsettled` | `onchain` | `simulated` — xem migration 004. */
+  readonly settlement_mode: string;
   readonly created_at: Date;
 }
 
 const SELECT_COLUMNS =
   'id, state, payout_count, total_micro::text AS total_micro, ' +
-  'estimated_gas::text AS estimated_gas, request_key, request_hash, chunk_index, tx_hash, created_at';
+  'estimated_gas::text AS estimated_gas, request_key, request_hash, chunk_index, tx_hash, ' +
+  'settlement_mode, created_at';
 
 export interface PayoutToCreate {
   /** Id payout do caller sinh. */

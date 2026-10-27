@@ -81,6 +81,7 @@ export interface RecentBatchRow {
   readonly total_micro: string;
   readonly created_at: Date;
   readonly tx_hash: string | null;
+  readonly settlement_mode: string;
 }
 
 export async function loadRecentBatches(
@@ -89,7 +90,7 @@ export async function loadRecentBatches(
   limit: number,
 ): Promise<RecentBatchRow[]> {
   const result = await db.query<RecentBatchRow>(
-    `SELECT id, state, payout_count, total_micro::text AS total_micro, created_at, tx_hash
+    `SELECT id, state, payout_count, total_micro::text AS total_micro, created_at, tx_hash, settlement_mode
        FROM batches
       WHERE platform_id = $1
       ORDER BY created_at DESC, id DESC

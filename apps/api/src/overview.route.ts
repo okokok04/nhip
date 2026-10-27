@@ -41,6 +41,7 @@ export function createOverviewRoutes(options: RouteOptions): Hono<AppEnv> {
         payoutCount: batch.payout_count,
         total_micro: batch.total_micro,
         txHash: batch.tx_hash,
+        settlementMode: batch.settlement_mode,
         created_at: batch.created_at.toISOString(),
       })),
     });

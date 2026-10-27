@@ -14,12 +14,52 @@ const STORAGE_KEY = 'nhip.apiKey';
 const THEME_KEY = 'nhip.theme';
 const PAGE_SIZE = 25;
 
+/**
+ * Khoá API của nền tảng demo trong `npm run seed`.
+ *
+ * Vì sao để lộ được: đây là dữ liệu mẫu, không phải tiền của ai, và toàn bộ bản ghi đều
+ * mang `is_demo = TRUE`. Nó **không** phải khoá của một nền tảng thật: nếu bạn deploy
+ * sản phẩm với dữ liệu thật, hãy xoá dòng này và đăng nhập bằng `/v1/me`.
+ *
+ * Nhãn "demo" trên giao diện **không** suy ra từ chuỗi này — nó đọc `isDemo` do API trả,
+ * để một khoá thật có chữ "seed" trong tên không bị dán nhãn sai, và ngược lại.
+ */
+const DEMO_SEED_API_KEY = 'nhip_sk_seed_00000000000000000000000000000001';
+
+/** Explorer Blockscout của Arc — đã kiểm route `/tx/:hash` tồn tại trên testnet. */
+const EXPLORER = {
+  testnet: 'https://explorer.testnet.arc.io',
+  mainnet: 'https://explorer.arc.io',
+};
+
+/**
+ * Hai con số gas **đo thật** trên Arc Testnet (2026-10-27, `eth_estimateGas` cho USDC
+ * `0x3600…0000`): 49.338 cho ví đã từng giữ token, 74.826 cho ví lạnh. Báo giá dùng cận
+ * trên; màn hình "Mạng Arc & Phí" cũng phải dùng đúng con số đó, không được bịa số đẹp.
+ */
+const GAS_PER_TRANSFER_COLD = 74_826n;
+const MIN_MAX_FEE_PER_GAS_WEI = 20_000_000_000n;
+const WEI_PER_MICRO = 1_000_000_000_000n;
+
+/** Giả định phí Ethereum L1 cho một lần transfer USDC — **không đo**, chỉ để so sánh. */
+const ETH_ASSUMED_FEE_MICRO = 2_520_000n;
+
 const STATE_LABEL = {
+  planned: 'Chờ gửi',
+  submitting: 'Đang gửi',
   queued: 'Chờ',
   batched: 'Trong lô',
   submitted: 'Đã gửi Arc',
   confirmed: 'Đã chi trả',
+  partial: 'Trả một phần',
   failed: 'Lỗi',
+  unknown: 'Chưa rõ',
+};
+
+const SETTLEMENT_MODE_LABEL = {
+  unsettled: 'Chưa lên chain',
+  onchain: 'Đã lên chain',
+  simulated: 'Dữ liệu demo',
 };
 
 const state = {
@@ -34,6 +74,11 @@ const state = {
   freshPayoutId: null,
   healthTimer: null,
   batchesById: new Map(),
+  /** `/v1/me` — nguồn sự thật cho tên nền tảng, cờ demo và cấu hình chain. */
+  me: null,
+  settleBatchId: null,
+  settleQuote: null,
+  settleDetail: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -324,27 +369,55 @@ async function openBatchDrawer(batchId) {
   $('drawer-batch-count').textContent = '—';
   $('drawer-batch-total').textContent = '—';
   $('drawer-batch-gas').textContent = '—';
-  $('drawer-batch-tx').textContent = '—';
+  $('drawer-batch-tx').replaceChildren(document.createTextNode('—'));
 
   const tbody = $('drawer-payouts-body');
   tbody.replaceChildren(emptyRow(4, 'Đang tải chi tiết các giao dịch trong lô…'));
 
   try {
-    const data = await api(`/v1/batches/${encodeURIComponent(batchId)}`);
-    $('drawer-batch-state').textContent = STATE_LABEL[data.state] ?? data.state;
-    $('drawer-batch-count').textContent = `${data.payoutCount} khoản`;
-    $('drawer-batch-total').textContent = `${formatUsdc(data.total_micro)} USDC`;
-    $('drawer-batch-gas').textContent = `${(data.estimatedGas ?? 0).toLocaleString('vi-VN')} gas`;
-    $('drawer-batch-tx').textContent = data.txHash ?? 'Chưa gửi lên chain (MVP)';
+    const [detail, settlement] = await Promise.all([
+      api(`/v1/batches/${encodeURIComponent(batchId)}`),
+      api(`/v1/settlement/batches/${encodeURIComponent(batchId)}`).catch(() => null),
+    ]);
 
-    if (!data.payouts || data.payouts.length === 0) {
+    $('drawer-batch-state').textContent = STATE_LABEL[detail.state] ?? detail.state;
+    $('drawer-batch-count').textContent = `${detail.payoutCount} khoản`;
+    $('drawer-batch-total').textContent = `${formatUsdc(detail.total_micro)} USDC`;
+
+    // B9: `estimatedGas` là chuỗi từ DB. Thiếu thì phải là "—", không phải "0 gas" —
+    // "0 gas" đọc như "miễn phí", trong khi sự thật là chưa biết.
+    $('drawer-batch-gas').textContent = detail.estimatedGas
+      ? `${Number(detail.estimatedGas).toLocaleString('vi-VN')} gas`
+      : '—';
+
+    // Mỗi payout là một tx riêng. Hash cấp lô không tồn tại trong mô hình này, nên chỗ
+    // này chỉ hiện nhãn settlement + hash đầu tiên đã có (nếu có) để người đọc biết
+    // sang bảng bên dưới mà xem từng dòng.
+    const modeLabel = SETTLEMENT_MODE_LABEL[detail.settlementMode] ?? detail.settlementMode ?? '—';
+    const hashes = (settlement?.payouts ?? []).map((p) => p.txHash).filter(Boolean);
+    const txNode = $('drawer-batch-tx');
+
+    if (hashes.length > 0) {
+      const first = hashes[0];
+      txNode.replaceChildren(
+        txLink(first, state.me?.chain?.network ?? 'testnet'),
+        document.createTextNode(` · ${hashes.length}/${detail.payoutCount} payout có hash`),
+      );
+    } else {
+      txNode.textContent = `${modeLabel} — chưa có hash nào`;
+    }
+
+    if (!detail.payouts || detail.payouts.length === 0) {
       tbody.replaceChildren(emptyRow(4, 'Lô này không có payout nào.'));
       return;
     }
 
-    const rows = data.payouts.map((p) => {
+    const txByPayout = new Map((settlement?.payouts ?? []).map((p) => [p.id, p.txHash]));
+
+    const rows = detail.payouts.map((p) => {
       const worker = state.workersById.get(p.workerId);
       const recipientName = worker?.displayName ?? worker?.externalId ?? shortenAddress(p.workerId);
+      const hash = txByPayout.get(p.id);
 
       return el(
         'tr',
@@ -356,6 +429,8 @@ async function openBatchDrawer(batchId) {
           'td',
           {},
           el('span', { class: `status-pill status-pill--${p.state}`, text: STATE_LABEL[p.state] ?? p.state }),
+          hash ? document.createTextNode(' ') : null,
+          hash ? txLink(hash, state.me?.chain?.network ?? 'testnet') : null,
         ),
       );
     });
@@ -365,6 +440,48 @@ async function openBatchDrawer(batchId) {
     $('drawer-batch-state').textContent = '—';
     tbody.replaceChildren(emptyRow(4, `Lỗi tải chi tiết: ${err.message}`));
     toast(`Không tải được chi tiết lô: ${err.message}`, 'error');
+  }
+}
+
+/** Liên kết tới explorer. Không bịa URL: chỉ hai mạng đã biết. */
+function txLink(txHash, network) {
+  const base = EXPLORER[network] ?? EXPLORER.testnet;
+  return el(
+    'a',
+    {
+      class: 'tx-link',
+      href: `${base}/tx/${txHash}`,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      title: txHash,
+      text: `${txHash.slice(0, 10)}…${txHash.slice(-6)}`,
+    },
+  );
+}
+
+/** Link biên nhận công khai của một người lao động, dựng từ origin đang chạy. */
+function receiptLink(claimToken) {
+  return `${window.location.origin}/?claim=${encodeURIComponent(claimToken)}`;
+}
+
+/**
+ * Copy link biên nhận vào clipboard.
+ *
+ * Vì sao phải có fallback: `navigator.clipboard` chỉ tồn tại trên HTTPS (hoặc localhost).
+ * Trên một bản deploy HTTP nội bộ, `navigator.clipboard` là `undefined` — và im lặng thất
+ * bại ở đây nghĩa là người vận hành tưởng đã copy trong khi clipboard rỗng.
+ */
+async function copyReceiptLink(claimToken) {
+  const link = receiptLink(claimToken);
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(link);
+      toast('Đã copy link biên nhận. Gửi link này cho người lao động.', 'success');
+      return;
+    }
+    throw new Error('Trình duyệt không cho phép ghi clipboard ở địa chỉ này.');
+  } catch (err) {
+    toast(`Không copy được link: ${err.message} Link là: ${link}`, 'error');
   }
 }
 
@@ -380,23 +497,36 @@ function initSavingsCalculator() {
 
   if (!slider) return;
 
+  // Phí một payout trên Arc, suy từ số đo thật, không phải hằng số marketing:
+  //   74.826 gas × 20 Gwei = 1.496.520.000.000.000 wei → 1.496 micro (làm tròn lên).
+  const arcFeePerPayoutMicro = (GAS_PER_TRANSFER_COLD * MIN_MAX_FEE_PER_GAS_WEI + WEI_PER_MICRO - 1n) / WEI_PER_MICRO;
+
   function update() {
-    const count = parseInt(slider.value, 10) || 5000;
+    const count = BigInt(parseInt(slider.value, 10) || 5000);
     countDisplay.textContent = `${count.toLocaleString('vi-VN')} người/ngày`;
 
-    // Ethereum: ~$2.52 gas/payout
-    const ethYearly = Math.round(count * 2.52 * 365);
-    // Arc (Circle L1): ~$0.0006 gas/payout
-    const arcYearly = Math.round(count * 0.0006 * 365);
-    const savedYearly = ethYearly - arcYearly;
+    const days = 365n;
+    const arcYearlyMicro = arcFeePerPayoutMicro * count * days;
+    const ethYearlyMicro = ETH_ASSUMED_FEE_MICRO * count * days;
+    const savedYearlyMicro = ethYearlyMicro - arcYearlyMicro;
 
-    ethCost.textContent = `$${ethYearly.toLocaleString('vi-VN')}`;
-    arcCost.textContent = `$${arcYearly.toLocaleString('vi-VN')}`;
-    saved.textContent = `$${savedYearly.toLocaleString('vi-VN')}`;
+    // Số tiền hiển thị bằng USD xấp xỉ (1 USDC ≈ 1 USD), quy từ micro bằng BigInt.
+    ethCost.textContent = `$${formatUsdFromMicro(ethYearlyMicro)}`;
+    arcCost.textContent = `$${formatUsdFromMicro(arcYearlyMicro)}`;
+    saved.textContent = `$${formatUsdFromMicro(savedYearlyMicro)}`;
   }
 
   slider.addEventListener('input', update);
   update();
+}
+
+/** micro-USDC (bigint) → chuỗi USD làm tròn tới đồng, dùng Intl thay vì Number trên đường tiền. */
+function formatUsdFromMicro(value) {
+  const units = value / 1_000_000n;
+  const remainder = value % 1_000_000n;
+  // Làm tròn tới đồng gần nhất: 0,5 USDC trở lên thì cộng 1.
+  const rounded = remainder >= 500_000n ? units + 1n : units;
+  return rounded.toLocaleString('vi-VN');
 }
 
 /* -------------------------------------------------------------------------
@@ -500,8 +630,14 @@ function initBulkPlanner() {
       validCountEl.textContent = String(valid);
       invalidCountEl.textContent = String(invalid);
       totalAmountEl.textContent = formatUsdc(totalMicro.toString());
-      // Giả định trần gas 10M với 28.000 gas/payout ~ 350 payouts/lô
-      batchesEstEl.textContent = String(Math.ceil(valid / 350) || (valid > 0 ? 1 : 0));
+
+      // Số payout tối đa mỗi lô do server quyết định (gasBudget ÷ gas đo thật trên Arc).
+      // Client không tự đoán: một con số lệch khiến người dùng tưởng 350 người vào một lô.
+      const maxPerBatch = state.me?.maxPayoutsPerBatch;
+      batchesEstEl.textContent =
+        typeof maxPerBatch === 'number' && maxPerBatch > 0
+          ? String(Math.ceil(valid / maxPerBatch) || (valid > 0 ? 1 : 0))
+          : '—';
 
       submitBtn.disabled = valid === 0;
       if (invalid > 0) {
@@ -627,6 +763,27 @@ function initWorkerPortal() {
           receiptsList.replaceChildren(...items);
         }
 
+        // Link biên nhận của chính người này — thứ để gửi cho họ qua Zalo/SMS.
+        const linkNote = $('lookup-claim-link');
+        if (linkNote) {
+          if (workerData.claimToken) {
+            const link = receiptLink(workerData.claimToken);
+            const copyBtn = el('button', { class: 'btn btn--ghost btn--xs', text: 'Copy link biên nhận' });
+            copyBtn.addEventListener('click', () => copyReceiptLink(workerData.claimToken));
+            linkNote.replaceChildren(
+              el('span', { class: 'receipt-note', text: 'Link công khai cho người lao động:' }),
+              document.createTextNode(' '),
+              el('code', { class: 'mono', text: link }),
+              document.createTextNode(' '),
+              copyBtn,
+            );
+          } else {
+            linkNote.replaceChildren(
+              el('span', { class: 'receipt-note', text: 'Người này chưa có token biên nhận.' }),
+            );
+          }
+        }
+
         portalResult.hidden = false;
         toast(`Đã tải thông tin của ${workerData.displayName || workerData.externalId}`, 'success');
       } catch (err) {
@@ -720,6 +877,17 @@ async function loadWorkers() {
         $('amount-input').focus();
       });
 
+      // Link biên nhận là thứ duy nhất người lao động cần. Nếu nền tảng không copy được
+      // link từ đây thì họ phải mở DB — và tính năng coi như không tồn tại.
+      const linkBtn = el('button', { class: 'btn btn--ghost btn--xs', text: 'Link biên nhận' });
+      linkBtn.addEventListener('click', async () => {
+        if (!w.claimToken) {
+          toast('Người này chưa có token biên nhận. Cập nhật hồ sơ rồi thử lại.', 'error');
+          return;
+        }
+        await copyReceiptLink(w.claimToken);
+      });
+
       return el(
         'tr',
         {},
@@ -727,7 +895,7 @@ async function loadWorkers() {
         el('td', { text: w.displayName || '—' }),
         el('td', { class: 'mono', text: w.address ? shortenAddress(w.address) : 'Chưa có ví' }),
         el('td', { text: formatDate(w.created_at) }),
-        el('td', { class: 'num' }, payBtn),
+        el('td', { class: 'num' }, payBtn, document.createTextNode(' '), linkBtn),
       );
     });
 
@@ -737,36 +905,66 @@ async function loadWorkers() {
   }
 }
 
+/** Gán text, hoặc "—" khi giá trị không có — B9: không được hiện 0 giả. */
+function setTextOrDash(id, value) {
+  const node = $(id);
+  if (node) node.textContent = value === null || value === undefined ? '—' : String(value);
+}
+
 function paintOverview(ov) {
-  // Bất biến B9: cấm hiện 0 khi chưa tải/lỗi. Nếu có ov hợp lệ thì hiện số thật.
-  $('kpi-queued-count').textContent = (ov.queued?.count ?? 0).toLocaleString('vi-VN');
-  $('kpi-queued-amount').textContent = formatUsdc(ov.queued?.totalMicro ?? ov.queued?.total_micro ?? '0');
+  // B9: chỉ hiện số khi API trả số. `?? 0` biến "chưa tải được" thành "không có gì",
+  // và người vận hành sẽ tin rằng hàng đợi rỗng trong khi thật ra request đã hỏng.
+  const bucket = (key) => {
+    const value = ov?.[key];
+    if (!value || typeof value !== 'object') return null;
+    const count = typeof value.count === 'number' ? value.count : null;
+    const micro = value.totalMicro ?? value.total_micro ?? null;
+    return { count, micro };
+  };
 
-  $('kpi-batched-count').textContent = (ov.batched?.count ?? 0).toLocaleString('vi-VN');
-  $('kpi-batched-amount').textContent = formatUsdc(ov.batched?.totalMicro ?? ov.batched?.total_micro ?? '0');
+  const queued = bucket('queued');
+  const batched = bucket('batched');
+  const confirmed = bucket('confirmed');
 
-  $('kpi-confirmed-count').textContent = (ov.confirmed?.count ?? 0).toLocaleString('vi-VN');
-  $('kpi-confirmed-amount').textContent = formatUsdc(ov.confirmed?.totalMicro ?? ov.confirmed?.total_micro ?? '0');
+  setTextOrDash('kpi-queued-count', queued?.count?.toLocaleString('vi-VN'));
+  setTextOrDash('kpi-queued-amount', queued?.micro == null ? null : formatUsdc(queued.micro));
+  setTextOrDash('kpi-batched-count', batched?.count?.toLocaleString('vi-VN'));
+  setTextOrDash('kpi-batched-amount', batched?.micro == null ? null : formatUsdc(batched.micro));
+  setTextOrDash('kpi-confirmed-count', confirmed?.count?.toLocaleString('vi-VN'));
+  setTextOrDash('kpi-confirmed-amount', confirmed?.micro == null ? null : formatUsdc(confirmed.micro));
 
-  const total = (ov.queued?.count ?? 0) + (ov.batched?.count ?? 0) + (ov.confirmed?.count ?? 0) + (ov.failed?.count ?? 0);
-  const settled = ov.confirmed?.count ?? 0;
-  const ratePct = total > 0 ? Math.round((settled / total) * 100) : 100;
+  // Tỉ lệ hoàn tất do server tính (confirmed / (confirmed + failed)). Tự chia ở client
+  // nghĩa là mỗi lần mở dashboard lại có thêm một chỗ có thể ra một con số khác.
+  const rate = typeof ov?.successRate === 'number' ? ov.successRate : null;
+  setTextOrDash('kpi-rate', rate === null ? null : `${Math.round(rate * 100)}%`);
+  $('kpi-rate-bar').style.width = rate === null ? '0%' : `${Math.round(rate * 100)}%`;
 
-  $('kpi-rate').textContent = `${ratePct}%`;
-  $('kpi-rate-bar').style.width = `${ratePct}%`;
-  $('kpi-workers').textContent = String(ov.workers ?? 0);
-  $('kpi-batches').textContent = String(ov.batches ?? 0);
+  setTextOrDash('kpi-workers', typeof ov?.workers === 'number' ? ov.workers : null);
+  setTextOrDash('kpi-batches', typeof ov?.batches === 'number' ? ov.batches : null);
 
-  // Bars
-  const max = Math.max(ov.queued?.count ?? 0, ov.batched?.count ?? 0, ov.confirmed?.count ?? 0, 1);
-  $('kpi-queued-bar').style.width = `${Math.round(((ov.queued?.count ?? 0) / max) * 100)}%`;
-  $('kpi-batched-bar').style.width = `${Math.round(((ov.batched?.count ?? 0) / max) * 100)}%`;
-  $('kpi-confirmed-bar').style.width = `${Math.round(((ov.confirmed?.count ?? 0) / max) * 100)}%`;
+  // Thanh so sánh chỉ vẽ khi cả ba con số đều có; nếu không thì để 0% (rỗng) thay vì
+  // vẽ một thanh đầy bằng suy đoán.
+  const counts = [queued?.count, batched?.count, confirmed?.count];
+  const max = Math.max(...counts.map((c) => c ?? 0), 1);
+  const width = (count) => (typeof count === 'number' ? `${Math.round((count / max) * 100)}%` : '0%');
+  $('kpi-queued-bar').style.width = width(queued?.count);
+  $('kpi-batched-bar').style.width = width(batched?.count);
+  $('kpi-confirmed-bar').style.width = width(confirmed?.count);
 
-  // Render recent batches
+  paintBatchTable(ov?.recentBatches);
+}
+
+function paintBatchTable(recentBatches) {
   const batchesBody = $('batches-body');
-  const batches = ov.recentBatches ?? [];
+  if (!batchesBody) return;
+
+  const batches = Array.isArray(recentBatches) ? recentBatches : null;
   state.batchesById.clear();
+
+  if (batches === null) {
+    batchesBody.replaceChildren(emptyRow(5, 'Không tải được danh sách lô. Bấm "Làm mới dữ liệu".'));
+    return;
+  }
 
   if (batches.length === 0) {
     batchesBody.replaceChildren(emptyRow(5, 'Chưa có lô thanh toán nào. Bấm "Gom lô" để bắt đầu.'));
@@ -775,11 +973,19 @@ function paintOverview(ov) {
 
   const batchRows = batches.map((b) => {
     state.batchesById.set(b.id, b);
+    const isDemo = b.settlementMode === 'simulated';
+
     const row = el(
       'tr',
       { style: 'cursor: pointer;' },
       el('td', { class: 'mono', text: b.id }),
-      el('td', {}, el('span', { class: `status-pill status-pill--${b.state}`, text: STATE_LABEL[b.state] ?? b.state })),
+      el(
+        'td',
+        {},
+        el('span', { class: `status-pill status-pill--${b.state}`, text: STATE_LABEL[b.state] ?? b.state }),
+        isDemo ? document.createTextNode(' ') : null,
+        isDemo ? el('span', { class: 'demo-badge', text: 'demo' }) : null,
+      ),
       el('td', { class: 'num', text: b.payoutCount }),
       el('td', { class: 'num', text: formatUsdc(b.total_micro) }),
       el('td', { text: formatDate(b.created_at) }),
@@ -794,15 +1000,24 @@ function paintOverview(ov) {
 
 function paintOverviewError() {
   // Bất biến B9: Lỗi -> "—" + thông báo. Tuyệt đối không để 0.
-  $('kpi-queued-count').textContent = '—';
-  $('kpi-queued-amount').textContent = '—';
-  $('kpi-batched-count').textContent = '—';
-  $('kpi-batched-amount').textContent = '—';
-  $('kpi-confirmed-count').textContent = '—';
-  $('kpi-confirmed-amount').textContent = '—';
-  $('kpi-rate').textContent = '—';
-  $('kpi-workers').textContent = '—';
-  $('kpi-batches').textContent = '—';
+  setTextOrDash('kpi-queued-count', null);
+  setTextOrDash('kpi-queued-amount', null);
+  setTextOrDash('kpi-batched-count', null);
+  setTextOrDash('kpi-batched-amount', null);
+  setTextOrDash('kpi-confirmed-count', null);
+  setTextOrDash('kpi-confirmed-amount', null);
+  setTextOrDash('kpi-rate', null);
+  setTextOrDash('kpi-workers', null);
+  setTextOrDash('kpi-batches', null);
+
+  for (const id of ['kpi-queued-bar', 'kpi-batched-bar', 'kpi-confirmed-bar', 'kpi-rate-bar']) {
+    const bar = $(id);
+    if (bar) bar.style.width = '0%';
+  }
+
+  // Bảng lô vẽ từ cùng một lần gọi API, nên nó cũng mất dữ liệu. Giữ lại bảng cũ là
+  // để người vận hành tưởng những lô đó vẫn đang ở trạng thái vừa hiển thị.
+  paintBatchTable(null);
 }
 
 async function loadOverview() {
@@ -870,13 +1085,26 @@ function initPayoutForm() {
   const form = $('payout-form');
   const submitBtn = $('payout-submit');
 
-  // Quick Chips
+  // Quick Chips — cộng tiền bằng BigInt (B10). `parseFloat('0.1') + parseFloat('0.2')`
+  // ra 0.30000000000000004, và với tiền thì đó không phải chuyện làm tròn cho đẹp.
   document.querySelectorAll('.chip-add').forEach((chip) => {
     chip.addEventListener('click', () => {
-      const add = chip.dataset.add;
       const input = $('amount-input');
-      const cur = parseFloat(input.value) || 0;
-      input.value = (cur + parseFloat(add)).toString();
+      if (!input) return;
+
+      const addParsed = parseAmountToMicro(chip.dataset.add ?? '');
+      if (addParsed.error) return;
+
+      const currentRaw = input.value.trim();
+      const currentParsed = currentRaw === '' ? { micro: '0' } : parseAmountToMicro(currentRaw);
+      if (currentParsed.error) {
+        toast(`Số tiền hiện tại không hợp lệ: ${currentParsed.error}`, 'error');
+        return;
+      }
+
+      const next = BigInt(currentParsed.micro) + BigInt(addParsed.micro);
+      input.value = formatUsdc(next.toString()).replace(/\./g, '').replace(',', '.');
+      input.focus();
     });
   });
 
@@ -979,11 +1207,7 @@ function initPayoutForm() {
       runBtn.textContent = '⚡ Đang gom lô…';
 
       try {
-        const idempotencyKey = `run_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-        const res = await api('/v1/batches/run', {
-          method: 'POST',
-          headers: { 'Idempotency-Key': idempotencyKey },
-        });
+        const res = await api('/v1/batches/from-queue', { method: 'POST' });
 
         if (res.batches && res.batches.length > 0) {
           toast(`Đã gom thành công ${res.payoutCount} payout thành ${res.batches.length} lô Arc!`, 'success');
@@ -1031,7 +1255,477 @@ function initPayoutForm() {
 }
 
 async function refreshAll() {
-  await Promise.allSettled([loadOverview(), loadPayouts(), loadWorkers()]);
+  await Promise.allSettled([loadMe(), loadOverview(), loadPayouts(), loadWorkers(), loadSettleableBatches()]);
+}
+
+/* -------------------------------------------------------------------------
+ * Settlement Loop (báo giá → gửi → đối soát)
+ *
+ * Ba bước là ba lần bấm riêng biệt. Không có nút nào tự động gọi bước sau: mỗi bước
+ * đều có thể sai theo cách không hoàn tác được, và người vận hành phải thấy con số
+ * trước khi đồng ý với nó.
+ * ---------------------------------------------------------------------- */
+
+async function loadMe() {
+  try {
+    const me = await api('/v1/me');
+    state.me = me;
+    renderPlatformIdentity(me);
+    renderChainStatus(me);
+    return me;
+  } catch {
+    // Không có `/v1/me` nghĩa là key không dùng được. Nhãn phải nói "—", không được
+    // để một tên nền tảng cũ nằm lại trên thanh tiêu đề.
+    state.me = null;
+    renderPlatformIdentity(null);
+    renderChainStatus(null);
+    return null;
+  }
+}
+
+function renderPlatformIdentity(me) {
+  const pill = $('platform-pill');
+  if (!pill) return;
+
+  if (!me) {
+    pill.replaceChildren(document.createTextNode('—'));
+    return;
+  }
+
+  const children = [document.createTextNode(me.name ?? me.id ?? '—')];
+  // Cờ demo đến từ DB (`platforms.is_demo`), không suy ra từ tên khoá API. Một khoá
+  // thật có chữ "seed" trong tên không được dán nhãn demo, và ngược lại.
+  if (me.isDemo) {
+    children.push(document.createTextNode(' '));
+    children.push(el('span', { class: 'demo-badge', text: 'Dữ liệu demo · sẽ reset' }));
+  }
+  pill.replaceChildren(...children);
+}
+
+function renderChainStatus(me) {
+  const chain = me?.chain;
+  const configured = chain?.configured === true;
+
+  const unconfigured = $('chain-unconfigured');
+  if (unconfigured) unconfigured.hidden = configured;
+
+  setTextOrDash('chain-network', configured ? chain.network : null);
+  setTextOrDash('chain-id', configured ? String(chain.chainId) : null);
+  setTextOrDash('chain-relayer', configured ? shortenAddress(chain.relayerAddress) : null);
+  setTextOrDash('chain-usdc', configured ? shortenAddress(chain.usdcAddress) : null);
+
+  const relayer = $('chain-relayer');
+  if (relayer && configured) relayer.title = chain.relayerAddress;
+  const usdc = $('chain-usdc');
+  if (usdc && configured) usdc.title = chain.usdcAddress;
+
+  // Không có khoá thì hai nút gửi/đối soát phải tắt ngay từ đầu. Để chúng sáng lên
+  // rồi báo lỗi 503 sau khi bấm là dạy người dùng rằng nút không đáng tin.
+  for (const id of ['settle-quote-btn', 'settle-confirm-btn']) {
+    const btn = $(id);
+    if (btn) btn.disabled = !configured;
+  }
+  if (!configured) {
+    const submit = $('settle-submit-btn');
+    if (submit) submit.disabled = true;
+  }
+}
+
+async function loadSettleableBatches() {
+  const select = $('settle-batch-select');
+  const help = $('settle-batch-help');
+  if (!select) return;
+
+  try {
+    const res = await api('/v1/settlement/batches?limit=50');
+    const batches = res.batches ?? [];
+
+    if (batches.length === 0) {
+      select.replaceChildren(el('option', { value: '' }, '— Không có lô nào đang chờ —'));
+      if (help) {
+        help.textContent =
+          'Không có lô ở trạng thái "Chờ gửi". Tạo payout mới ở tab Vận hành rồi bấm "Gom lô hàng đợi".';
+      }
+      state.settleBatchId = null;
+      return;
+    }
+
+    select.replaceChildren(
+      el('option', { value: '' }, '-- Chọn lô cần thanh toán --'),
+      ...batches.map((b) => {
+        const label = `${b.id} · ${b.payoutCount} người · ${formatUsdc(b.total_micro)} USDC · ${STATE_LABEL[b.state] ?? b.state}`;
+        return el('option', { value: b.id }, label);
+      }),
+    );
+
+    if (help) help.textContent = `${batches.length} lô đang chờ xử lý, lô cũ nhất ở đầu danh sách.`;
+
+    // Giữ lựa chọn hiện tại nếu lô đó vẫn còn trong danh sách.
+    if (state.settleBatchId && batches.some((b) => b.id === state.settleBatchId)) {
+      select.value = state.settleBatchId;
+    }
+  } catch (err) {
+    select.replaceChildren(el('option', { value: '' }, 'Lỗi tải danh sách lô'));
+    if (help) help.textContent = `Không tải được danh sách lô: ${err.message}`;
+  }
+}
+
+function initSettlement() {
+  const select = $('settle-batch-select');
+  const quoteBtn = $('settle-quote-btn');
+  const reloadBtn = $('settle-reload-btn');
+  const submitBtn = $('settle-submit-btn');
+  const confirmBtn = $('settle-confirm-btn');
+
+  if (select) {
+    select.addEventListener('change', async () => {
+      state.settleBatchId = select.value || null;
+      state.settleQuote = null;
+      hideQuote();
+      if (state.settleBatchId) await loadSettlementDetail(state.settleBatchId, { silent: true });
+    });
+  }
+
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', async () => {
+      await loadSettleableBatches();
+      if (state.settleBatchId) await loadSettlementDetail(state.settleBatchId, { silent: true });
+      toast('Đã tải lại danh sách lô.', 'info');
+    });
+  }
+
+  if (quoteBtn) {
+    quoteBtn.addEventListener('click', async () => {
+      const batchId = requireSelectedBatch();
+      if (!batchId) return;
+
+      setBusy(quoteBtn, true, 'Đang báo giá…');
+      try {
+        const quote = await api(`/v1/settlement/batches/${encodeURIComponent(batchId)}/quote`, { method: 'POST' });
+        state.settleQuote = quote;
+        paintQuote(quote);
+        await loadSettlementDetail(batchId, { silent: true });
+      } catch (err) {
+        hideQuote();
+        toast(`Không báo giá được: ${err.message}`, 'error');
+      } finally {
+        setBusy(quoteBtn, false, 'Báo giá phí');
+      }
+    });
+  }
+
+  if (submitBtn) {
+    submitBtn.addEventListener('click', async () => {
+      const batchId = requireSelectedBatch();
+      if (!batchId) return;
+
+      if (!state.settleQuote) {
+        toast('Phải báo giá trước khi gửi.', 'error');
+        return;
+      }
+
+      // Xác nhận lần hai: đây là hành động duy nhất trong sản phẩm không thể hoàn tác.
+      const total = formatUsdc(state.settleQuote.total_micro);
+      const count = state.settleQuote.payoutCount;
+      const ok = window.confirm(
+        `Gửi ${count} giao dịch USDC (tổng ${total} USDC + phí) lên Arc?\n\n` +
+          'Thao tác này không thể hoàn tác. Hệ thống sẽ trả về ngay khi transaction được broadcast.',
+      );
+      if (!ok) return;
+
+      setBusy(submitBtn, true, 'Đang gửi lên Arc…');
+      try {
+        const res = await api(`/v1/settlement/batches/${encodeURIComponent(batchId)}/submit`, { method: 'POST' });
+        toast(
+          `Đã broadcast ${res.sentCount}/${res.sentCount + res.failedToSendCount} giao dịch. ` +
+            'Bấm "Đọc receipt từ Arc" sau vài giây để xác nhận.',
+          res.failedToSendCount > 0 ? 'error' : 'success',
+        );
+        state.settleQuote = null;
+        hideQuote();
+        await refreshAll();
+        await loadSettlementDetail(batchId, { silent: true });
+      } catch (err) {
+        toast(`Gửi thất bại: ${err.message}`, 'error');
+        // Báo giá có thể đã bị tiêu do lỗi nonce/số dư: buộc báo giá lại thay vì để
+        // người dùng bấm "Gửi" lần nữa với con số cũ.
+        state.settleQuote = null;
+        hideQuote();
+      } finally {
+        setBusy(submitBtn, false, 'Gửi lên Arc');
+      }
+    });
+  }
+
+  if (confirmBtn) {
+    confirmBtn.addEventListener('click', async () => {
+      const batchId = requireSelectedBatch();
+      if (!batchId) return;
+
+      setBusy(confirmBtn, true, 'Đang đọc receipt…');
+      try {
+        const res = await api(`/v1/settlement/batches/${encodeURIComponent(batchId)}/confirm`, { method: 'POST' });
+        const tally = res.tally ?? {};
+        toast(
+          `Đối soát xong: ${tally.confirmedCount ?? 0} đã trả, ${tally.submittedCount ?? 0} còn chờ, ` +
+            `${tally.failedCount ?? 0} thất bại.`,
+          tally.failedCount > 0 ? 'error' : 'success',
+        );
+        await refreshAll();
+        await loadSettlementDetail(batchId, { silent: true });
+      } catch (err) {
+        toast(`Không đối soát được: ${err.message}`, 'error');
+      } finally {
+        setBusy(confirmBtn, false, 'Đọc receipt từ Arc');
+      }
+    });
+  }
+}
+
+function requireSelectedBatch() {
+  const select = $('settle-batch-select');
+  const batchId = select?.value || state.settleBatchId;
+  if (!batchId) {
+    toast('Chọn một lô trước đã.', 'error');
+    return null;
+  }
+  state.settleBatchId = batchId;
+  return batchId;
+}
+
+/** Bật/tắt trạng thái bận của nút: spinner nội tuyến + nhãn, không spinner toàn màn hình. */
+function setBusy(button, busy, label) {
+  if (!button) return;
+  button.classList.toggle('is-busy', busy);
+  button.disabled = busy;
+  const labelNode = button.querySelector('.btn__label');
+  if (labelNode) labelNode.textContent = label;
+}
+
+function hideQuote() {
+  const box = $('quote-box');
+  if (box) box.hidden = true;
+  const submit = $('settle-submit-btn');
+  if (submit) submit.disabled = true;
+}
+
+function paintQuote(quote) {
+  const box = $('quote-box');
+  if (!box) return;
+  box.hidden = false;
+
+  setTextOrDash('quote-count', `${quote.payoutCount} payout`);
+  setTextOrDash('quote-total', `${formatUsdc(quote.total_micro)} USDC`);
+  setTextOrDash('quote-gas-per', `${Number(quote.gasPerTransfer).toLocaleString('vi-VN')} gas`);
+  setTextOrDash('quote-gas', `${Number(quote.gas).toLocaleString('vi-VN')} gas`);
+  setTextOrDash('quote-fee-gas', `${formatGwei(quote.maxFeePerGasWei)} Gwei`);
+  setTextOrDash('quote-fee', `${formatUsdc(quote.maxFeeMicro)} USDC`);
+  setTextOrDash('quote-balance', `${formatUsdc(quote.relayerBalanceMicro)} USDC`);
+
+  // Nói rõ gas là số đo hay cận trên. Hai thứ này khác nhau về mức tin cậy, và người
+  // vận hành cần biết mình đang nhìn cái nào.
+  setTextOrDash('quote-source', quote.gasMeasured ? 'Đo từ Arc (estimateGas)' : 'Cận trên ví lạnh 75.000');
+
+  const verdict = $('quote-verdict');
+  if (verdict) {
+    if (quote.affordable) {
+      verdict.className = 'quote-verdict quote-verdict--ok';
+      verdict.textContent =
+        'Đủ số dư cho cả tiền lẫn phí tối đa. Báo giá có hiệu lực 5 phút kể từ lúc tạo.';
+    } else {
+      verdict.className = 'quote-verdict quote-verdict--short';
+      verdict.textContent =
+        `Thiếu ${formatUsdc(quote.shortfallMicro)} USDC. Nạp thêm vào ví relayer ` +
+        `${shortenAddress(quote.relayerAddress)} rồi báo giá lại.`;
+    }
+  }
+
+  if (quote.skippedWithoutAddress > 0) {
+    toast(`${quote.skippedWithoutAddress} payout bị bỏ qua vì người nhận chưa có địa chỉ ví.`, 'error');
+  }
+
+  const submit = $('settle-submit-btn');
+  if (submit) submit.disabled = !quote.affordable || state.me?.chain?.configured !== true;
+}
+
+/** wei → Gwei, giữ 2 chữ số thập phân, tính bằng BigInt (không đi qua Number). */
+function formatGwei(weiText) {
+  let wei;
+  try {
+    wei = BigInt(weiText);
+  } catch {
+    return '—';
+  }
+  const gwei = wei / 1_000_000_000n;
+  const fraction = ((wei % 1_000_000_000n) / 10_000_000n).toString().padStart(2, '0');
+  return `${gwei.toLocaleString('vi-VN')},${fraction}`;
+}
+
+async function loadSettlementDetail(batchId, options = {}) {
+  const tbody = $('settle-payouts-body');
+  if (!tbody) return;
+
+  if (!options.silent) {
+    tbody.replaceChildren(emptyRow(5, 'Đang tải chi tiết lô…'));
+  }
+
+  try {
+    const detail = await api(`/v1/settlement/batches/${encodeURIComponent(batchId)}`);
+    state.settleDetail = detail;
+
+    const tally = detail.tally ?? {};
+    setTextOrDash('settle-confirmed', String(tally.confirmedCount ?? 0));
+    setTextOrDash('settle-pending', String(tally.submittedCount ?? 0));
+    setTextOrDash('settle-failed', String(tally.failedCount ?? 0));
+
+    const modePill = $('settle-mode-pill');
+    if (modePill) {
+      modePill.textContent = SETTLEMENT_MODE_LABEL[detail.settlementMode] ?? detail.settlementMode ?? '—';
+    }
+
+    const sub = $('settle-payouts-sub');
+    if (sub) {
+      sub.textContent =
+        `Lô ${detail.batchId} · ${detail.payouts.length} payout · trạng thái ${STATE_LABEL[detail.state] ?? detail.state}`;
+    }
+
+    const confirmBtn = $('settle-confirm-btn');
+    if (confirmBtn) confirmBtn.disabled = !detail.canConfirm || detail.chainConfigured !== true;
+
+    const submitBtn = $('settle-submit-btn');
+    if (submitBtn && !state.settleQuote) submitBtn.disabled = true;
+
+    if (detail.payouts.length === 0) {
+      tbody.replaceChildren(emptyRow(5, 'Lô này không có payout nào.'));
+      return;
+    }
+
+    const network = detail.network ?? state.me?.chain?.network ?? 'testnet';
+
+    const rows = detail.payouts.map((p) => {
+      const hash = p.txHash;
+      const blockGas =
+        p.blockNumber === null && p.gasUsed === null
+          ? '—'
+          : `${p.blockNumber ?? '—'} / ${p.gasUsed ? Number(p.gasUsed).toLocaleString('vi-VN') : '—'}`;
+
+      return el(
+        'tr',
+        {},
+        el('td', { class: 'mono', text: p.id }),
+        el('td', { class: 'num', text: formatUsdc(p.amount_micro) }),
+        el(
+          'td',
+          {},
+          el('span', { class: `status-pill status-pill--${p.state}`, text: STATE_LABEL[p.state] ?? p.state }),
+          p.failureReason
+            ? el('div', { class: 'receipt-note', text: p.failureReason })
+            : null,
+        ),
+        el('td', {}, hash ? txLink(hash, network) : document.createTextNode('—')),
+        el('td', { class: 'num mono', text: blockGas }),
+      );
+    });
+
+    tbody.replaceChildren(...rows);
+  } catch (err) {
+    if (!options.silent) {
+      tbody.replaceChildren(emptyRow(5, `Lỗi tải chi tiết lô: ${err.message}`));
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Public receipt view — `?claim=<token>`, không cần API key
+ *
+ * Người lao động gig không có tài khoản ở đây. Cách duy nhất để họ tự kiểm là một
+ * đường link, và link đó phải hoạt động mà không đòi đăng nhập.
+ * ---------------------------------------------------------------------- */
+
+const RECEIPT_STATE_LABEL = {
+  pending: 'Đang chờ',
+  sending: 'Đang gửi',
+  paid: 'Đã nhận',
+  failed: 'Thất bại',
+  checking: 'Đang kiểm tra',
+};
+
+async function initReceiptView(token) {
+  const shell = $('shell');
+  const gate = $('gate');
+  const page = $('receipt-page');
+
+  if (shell) shell.hidden = true;
+  if (gate) gate.hidden = true;
+  if (page) page.hidden = false;
+
+  const status = $('receipt-status');
+  const body = $('receipt-body');
+
+  try {
+    // Không Authorization header: `api()` sẽ tự gắn key nếu có, nên gọi fetch trực tiếp.
+    const res = await fetch(`/v1/receipts/${encodeURIComponent(token)}`);
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null);
+      throw new Error(payload?.error?.message ?? `Không mở được biên nhận (${res.status}).`);
+    }
+    const data = await res.json();
+
+    if (status) status.textContent = `${data.platformName} · ${data.worker.displayName ?? data.worker.externalId}`;
+    if (body) body.hidden = false;
+
+    setTextOrDash('receipt-name', data.worker.displayName ?? data.worker.externalId);
+    setTextOrDash('receipt-ext-id', `Mã: ${data.worker.externalId}`);
+    setTextOrDash('receipt-paid', `${formatUsdc(data.totals.paid_micro)} USDC`);
+    setTextOrDash('receipt-pending', `${formatUsdc(data.totals.pending_micro)} USDC`);
+
+    const walletNote = $('receipt-wallet-note');
+    if (walletNote) {
+      walletNote.textContent = data.worker.hasWallet
+        ? 'Tài khoản của bạn đã liên kết ví nhận tiền.'
+        : 'Tài khoản của bạn chưa liên kết ví. Liên hệ nền tảng để cập nhật trước khi được chi trả.';
+    }
+
+    const list = $('receipt-list');
+    if (list) {
+      if (data.receipts.length === 0) {
+        list.replaceChildren(el('div', { class: 'empty', text: 'Chưa có khoản chi trả nào.' }));
+      } else {
+        list.replaceChildren(
+          ...data.receipts.map((item) =>
+            el(
+              'div',
+              { class: 'receipt-item glass' },
+              el(
+                'div',
+                { class: 'receipt-item__left' },
+                el('span', { class: 'receipt-item__ref', text: item.reference || 'Thanh toán lương gig' }),
+                el(
+                  'span',
+                  { class: 'receipt-item__date mono', text: `${formatDate(item.paid_at ?? item.created_at)} · ${item.id}` },
+                ),
+                item.txHash
+                  ? el('span', {}, txLink(item.txHash, item.network ?? 'testnet'))
+                  : el('span', { class: 'receipt-note', text: 'Chưa có giao dịch on-chain cho khoản này.' }),
+              ),
+              el(
+                'div',
+                { class: 'receipt-item__right' },
+                el('span', { class: 'receipt-item__amount mono', text: `${formatUsdc(item.amount_micro)} USDC` }),
+                el('div', {}, el('span', { class: `status-pill status-pill--${item.state === 'paid' ? 'confirmed' : item.state}`, text: RECEIPT_STATE_LABEL[item.state] ?? item.state })),
+                item.isDemo ? el('span', { class: 'demo-badge', text: 'demo' }) : null,
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    if (status) status.dataset.loaded = 'true';
+  } catch (err) {
+    if (status) status.textContent = err.message;
+    if (body) body.hidden = true;
+  }
 }
 
 /* -------------------------------------------------------------------------
@@ -1045,7 +1739,7 @@ function initGate() {
 
   if (pasteSeedBtn && keyInput) {
     pasteSeedBtn.addEventListener('click', () => {
-      keyInput.value = 'nhip_sk_seed_00000000000000000000000000000001';
+      keyInput.value = DEMO_SEED_API_KEY;
       form.requestSubmit();
     });
   }
@@ -1064,9 +1758,10 @@ function initGate() {
         localStorage.setItem(STORAGE_KEY, key);
         $('gate').hidden = true;
         $('shell').hidden = false;
-        $('platform-pill').textContent = 'plat_demo';
         gateError.textContent = '';
         toast('Kết nối thành công tới Nhịp Arc L1!', 'success');
+        // Nhãn nền tảng + cấu hình chain lấy từ `/v1/me` bên trong `refreshAll`; không gán
+        // cứng tên hay id ở đây, vì làm vậy sẽ đúng với demo và sai với mọi khách khác.
         await refreshAll();
       } catch (err) {
         state.apiKey = null;
@@ -1084,9 +1779,19 @@ function initGate() {
 function disconnect() {
   localStorage.removeItem(STORAGE_KEY);
   state.apiKey = null;
+  // Xoá cả trạng thái settlement: giữ báo giá của phiên trước nghĩa là người dùng có thể
+  // bấm "Gửi" bằng một con số thuộc về một danh tính khác.
+  state.me = null;
+  state.settleBatchId = null;
+  state.settleQuote = null;
+  state.settleDetail = null;
+
   $('shell').hidden = true;
   $('gate').hidden = false;
   $('api-key-input').value = '';
+  hideQuote();
+  renderPlatformIdentity(null);
+  renderChainStatus(null);
   paintOverviewError();
   toast('Đã ngắt kết nối API key.', 'info');
 }
@@ -1122,6 +1827,16 @@ async function checkHealth() {
  * ---------------------------------------------------------------------- */
 async function initApp() {
   initTheme();
+
+  // Trang biên nhận là một chế độ **riêng**, không phải một tab: người mở link không
+  // có API key, không được (và không cần) thấy dashboard. Nhận diện trước khi init bất
+  // kỳ module nào của shell, và return sớm để không gọi endpoint cần xác thực.
+  const claimToken = new URLSearchParams(window.location.search).get('claim');
+  if (claimToken) {
+    await initReceiptView(claimToken);
+    return;
+  }
+
   initTabs();
   initCommandPalette();
   initBatchDrawer();
@@ -1129,19 +1844,15 @@ async function initApp() {
   initBulkPlanner();
   initWorkerPortal();
   initPayoutForm();
+  initSettlement();
   initGate();
 
-  // Mặc định luôn nạp môi trường Demo Sandbox (Giao Hàng Nhanh) để người dùng trải nghiệm tức thì
-  const savedKey = localStorage.getItem(STORAGE_KEY) || 'nhip_sk_seed_00000000000000000000000000000001';
-  state.apiKey = savedKey;
+  // Khoá lưu trong máy, hoặc khoá seed của môi trường demo. Đây là **điểm vào duy nhất**
+  // của bản demo; nhãn "demo" trên giao diện vẫn do `isDemo` từ API quyết định.
+  state.apiKey = localStorage.getItem(STORAGE_KEY) || DEMO_SEED_API_KEY;
 
   if ($('gate')) $('gate').hidden = true;
   if ($('shell')) $('shell').hidden = false;
-
-  const pill = $('platform-pill');
-  if (pill) {
-    pill.textContent = savedKey.includes('seed') ? 'Giao Hàng Nhanh (Demo Sandbox)' : 'Live Enterprise';
-  }
 
   await refreshAll();
 

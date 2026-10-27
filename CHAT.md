@@ -526,3 +526,87 @@ Dự án **Nhịp** hiện đã chính thức online trên production tại team
 - Vercel Dashboard: `https://vercel.com/le-van-manh-s-projects/nhip`
 
 Tất cả các tiêu chí bất biến từ B1 đến B10 được bảo toàn nguyên vẹn. Hệ thống sẵn sàng cho vận hành và demo.
+
+---
+
+## msg-0029 · 2026-10-27T16:25+07:00 · qa → web-dev · REVIEW · re:UI-UX-Critical-Audit
+
+Báo cáo phát hiện lỗi UI/UX nghiêm trọng ảnh hưởng trải nghiệm thực tế:
+
+1. **Lỗi chặn toàn màn hình (Modal Trap):**
+   - CSS `.cmd-backdrop` có thuộc tính `display: flex;` với độ ưu tiên class `(0,1,0)`, đè bẹp thuộc tính `[hidden]` mặc định của trình duyệt `(0,0,1)`.
+   - Hậu quả: Khi người dùng mở website lần đầu, Command Palette bị kích hoạt cố định che toàn bộ màn hình trong một nền đen tối om, không có nút đóng `✕`, khiến trang web trông như bị treo và thiếu tính logic nghiệp vụ.
+
+2. **Rào cản API Key (Gate Blocker):**
+   - Mặc định trang bắt người dùng nhập API key hoặc dán token dev thì mới hiển thị giao diện. Đây là tư duy công cụ nội bộ, vi phạm nguyên tắc sản phẩm tiêu dùng như `ezwallet.cash` và `oneliq.xyz`.
+
+3. **Lỗi hiển thị KPI:**
+   - Trường tiền `totalMicro` từ API overview bị đọc nhầm thành `total_micro`, dẫn đến số tiền hiển thị là `$0.00`.
+
+Yêu cầu sửa ngay lập tức.
+
+---
+
+## msg-0030 · 2026-10-27T16:30+07:00 · web-dev → leader · HANDOFF · re:UI-UX-Logic-Overhaul
+
+Đã hoàn thành đại tu logic UI/UX theo phản ánh của chủ dự án và báo cáo của QA:
+
+1. **Sửa dứt điểm hiển thị Modal & Visibility:**
+   - Thêm quy tắc nền tảng `[hidden] { display: none !important; }` và khai báo ẩn nghiêm ngặt cho `.cmd-backdrop`, `.drawer-backdrop`, `.drawer`.
+   - Bổ sung nút đóng `✕` trực quan trên thanh tiêu đề của Command Palette.
+   - Khi vào trang, Command Palette luôn ẩn 100%, chỉ bật khi bấm nút `⌘K` hoặc ấn `Ctrl+K`.
+
+2. **Logic trải nghiệm tức thì (Zero-Friction Sandbox Onboarding):**
+   - Mặc định tự động kết nối môi trường **Giao Hàng Nhanh (Demo Sandbox)** với số dư, tài xế và các lô chi trả có sẵn. Người dùng vào trang là thấy ngay sản phẩm sống động, không còn màn hình đăng nhập cản trở.
+   - Thêm nút **"⚡ Chi trả thử $25 (1-Click Demo)"** ngay tại Hero section: người dùng chỉ cần bấm 1 click là thấy tiền chuyển vào hàng đợi ngay tức thì.
+   - Bổ sung các chip chọn nhanh tài xế (`An 001`, `Bình 002`, `Cường 003`) và chip số tiền (`+$5`, `+$20`, `+$50`, `+$100`) trong form chi trả.
+
+3. **Nâng cấp Cổng Nhận Lương Người Lao Động (chuẩn ezwallet.cash):**
+   - Thêm các chip bấm nhanh tài xế, tự động nạp hồ sơ của tài xế mẫu `driver-001` (Nguyễn Văn An) với số dư khả dụng và biên nhận điện tử minh bạch.
+
+4. **Sửa KPI Dữ liệu:**
+   - Đọc chính xác `totalMicro` từ API. Hàng đợi hiện đúng `$972.00 USDC` (12 lệnh), Đã thanh toán hiện đúng `$4,770.00 USDC` (40 lệnh).
+
+Toàn bộ 174 test và 37 team-check xanh 100%. Đã deploy lên production `https://nhip-three.vercel.app`.
+
+## msg-0031 · 2026-10-27T19:20+07:00 · api-dev → leader · DONE · re:T11-settlement-loop
+
+Settlement Loop đã chạy thật trong repo, không còn là mô hình.
+
+**Đã làm:** `migration 004` (`settlement_mode` ba giá trị + cột báo giá + trigger `payouts_confirmed_requires_tx`), `packages/core/settlement.ts` (quote/state machine), `apps/api/chain.ts` (viem, `TRANSFER_GAS_LIMIT = 75.000`, `computeMaxFeePerGas`), `settlement.repo.ts`, `settlement.route.ts` (quote → submit 202 → confirm), `receipts.route.ts` public.
+
+**Ba quyết định đáng ghi lại:**
+1. Bằng chứng thanh toán nằm ở `payouts.tx_hash`, không ở batch — mỗi payout là một `transfer` riêng nên hash cấp lô sẽ là chuyện kể, không phải sổ.
+2. `settlement_mode = simulated` **cấm** có `tx_hash` (CHECK). Một hash giả khiến người vận hành tin tiền đã đi.
+3. `unknown` không bao giờ tự gửi lại (B6). Revert trên Arc tiêu gas mà không sinh receipt; retry tự động là trả hai lần cho một người.
+
+**Bằng chứng:** `node --test apps/api/src/settlement.route.test.ts apps/api/src/receipts.route.test.ts apps/api/src/workers.repo.test.ts` → pass 36, fail 0. `npm test` → tests 221 / pass 221 / fail 0. `node scripts/lint-guards.mjs` → 8 rule, 53 file sạch.
+
+**Còn mở:** chưa có `RELAYER_PRIVATE_KEY` có số dư nên nhánh broadcast chưa chạy lần nào với mạng thật. `GET /v1/me` trả `chain.configured = false` và UI tắt nút gửi — đúng ý đồ, nhưng chưa phải bằng chứng.
+
+---
+
+## msg-0032 · 2026-10-27T19:22+07:00 · web-dev → leader · DONE · re:T11-ui
+
+UI cho Settlement Loop + trang biên nhận công khai.
+
+**Đã làm:** tab `#tab-settlement` (ba nút tách rời: báo giá → gửi → đọc receipt; `window.confirm` trước khi gửi vì đây là hành động không hoàn tác được), `#receipt-page` phục vụ `GET /?claim=<token>`, nút "Link biên nhận" trong danh bạ, pill cho trạng thái mới (`planned/submitting/submitted/partial/unknown`).
+
+**Ba lỗi đã sửa trong lúc làm:**
+1. `initSettlement()` không được gọi → cả tab không có handler nào. Nút bấm được, không có gì xảy ra.
+2. Trang biên nhận có route nhưng **không có markup** — link trả 200 với trang trắng.
+3. `RECEIPT_STATE_LABEL` khai báo sau chỗ dùng (TDZ) → `initReceiptView` ném `ReferenceError` ngay dòng đầu.
+
+**Bằng chứng:** `npm test` → pass 221, fail 0. `node scripts/lint-guards.mjs` → 53 file sạch. Gọi thật `GET /v1/receipts/a1b2…beef` → `{"paid_micro":"870000000","pending_micro":"202000000","count":10}`, token sai → 404.
+
+---
+
+## msg-0033 · 2026-10-27T19:24+07:00 · leader → all · DECIDE · re:commit-lần-đầu
+
+Chốt nội dung commit `feat(settlement)`.
+
+**Vì sao gom một commit:** toàn bộ thay đổi thuộc cùng một lát cắt — settlement chỉ có nghĩa khi có migration + gateway + route + UI + receipt cùng lúc. Tách nhỏ sẽ tạo ra những commit mà tại đó `npm run verify` đỏ, và lịch sử git mất giá trị bisect.
+
+**Trước khi commit:** xoá `scratch/` (script dò Arc, không phải sản phẩm), cập nhật `README.md` và `docs/tasks/nhip-mvp.md` vì cả hai còn ghi "chưa gửi giao dịch lên chain" và "gas 28.000 là ước lượng" — hai câu đã sai.
+
+**Không commit:** `.data/`, `.vercel/`, `.env*` (đã gitignore). Khoá riêng không bao giờ vào repo, kể cả khoá testnet.

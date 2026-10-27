@@ -73,19 +73,31 @@ Trạng thái: đang làm
   - Xong khi: Giao diện đầy đủ tính năng, tương thích Dark/Light mode, tuân thủ nghiêm ngặt B9 (lỗi hiện `—`, cấm hiện 0) và B10 (BigInt micro), `npm run verify` chạy xanh toàn bộ.
   - **Bằng chứng:** `npm run verify` xanh 100%: 174 test pass, 0 fail, 8 rule lint guards sạch, 30 kiểm tra team check xanh.
 
+- [x] T11 — Settlement Loop thật trên Arc + biên nhận công khai
+  - Làm gì:
+    1. `migration 004`: `batches.settlement_mode` (`unsettled|onchain|simulated`), cột báo giá, `payouts.tx_hash/block_number/gas_used`, `platforms.is_demo/relayer_address`. Ràng buộc: lô `simulated` không được có `tx_hash`; payout `confirmed` phải có `tx_hash` trừ lô demo (trigger, vì điều kiện vắt qua hai bảng).
+    2. `packages/core/settlement.ts`: `quoteBatchFee` (BigInt wei → micro, 1 micro = 10^12 wei), `canSubmit`, `canConfirm`, `settleBatchState`.
+    3. `apps/api/chain.ts`: `ChainGateway` + viem, `TRANSFER_GAS_LIMIT = 75.000`, `maxFeePerGas = max(giá thị trường + 25%, 20 Gwei)`, `sumUsdcTransferLogs` **lọc theo địa chỉ contract** (mỗi transfer phát hai log `Transfer`).
+    4. `POST /quote` → `POST /submit` (202, nonce cấp tuần tự) → `POST /confirm` (đọc receipt). Không endpoint nào chờ chain (B5).
+    5. `GET /v1/receipts/:claimToken` public, `claim_token` 24 byte CSPRNG sinh ở Node, không trả địa chỉ ví.
+    6. UI: tab "Thanh toán on-chain" (3 nút tách rời) + trang biên nhận `?claim=`.
+  - Chạm file: `packages/db/migrations/004_settlement.sql`, `packages/db/src/migrate.ts`, `packages/db/src/pg.ts`, `packages/core/src/settlement.ts`, `apps/api/src/{chain,settlement.repo,settlement.route,receipts.route}.ts`, `apps/api/src/workers.repo.ts`, `apps/web/public/*`
+  - Xong khi: `npm run verify` xanh; seed chạy lại không lỗi; biên nhận mở được mà không cần key.
+  - **Bằng chứng:** `npm test` → **221 test pass, 0 fail** (46 suite), gồm 15 test `settlement.route.test.ts`, 10 `receipts.route.test.ts`, 11 `workers.repo.test.ts`. `node scripts/lint-guards.mjs` → 8 rule, 53 file sạch. `node scripts/team-check.mjs` → 42 kiểm tra xanh (33 tin chat). `npm run seed` → `workers 5 / payouts 52 / batches 1`, chạy hai lần liên tiếp không nhân đôi, `confirmed_at` = `created_at`. Gọi thật: `GET /v1/receipts/<token>` → 200, `totals.paid_micro = 870000000`, 10 dòng, token sai → 404.
+
 ## Ghi chú tiến độ
 
-- 2026-10-27: T1–T10 xong hoàn chỉnh. `npm run verify` → **174 test pass, 0 fail**, typecheck sạch, team:check 30 xanh.
-- Seed chạy thật: 5 worker, 52 payout, 1 lô lịch sử. Chạy lại không nhân đôi dữ liệu.
+- 2026-10-27: T1–T11 xong. `npm run verify` → **221 test pass, 0 fail**, typecheck sạch, 42 kiểm tra team check xanh.
+- Seed chạy thật: 5 worker, 52 payout, 1 lô lịch sử (`simulated`, không có `tx_hash`). Chạy lại không nhân đôi dữ liệu.
 - Dashboard phục vụ cùng origin với API nên không có CORS: một key, một origin, không cấu hình thêm.
-- Chưa chạm chain ở lát cắt này. `PayoutVault` và EIP-3009 để Phase 2–3.
-- Rủi ro đang mở: `28.000 gas/payout` vẫn là **ước lượng**. Cần đo thật trên Arc Testnet trước khi chốt `gasBudget`.
+- `28.000 gas/payout` **đã bị thay bằng số đo thật**: 49.338 (ví ấm) – 74.826 (ví lạnh). Trần chia lô dùng 75.000. Con số cũ thấp hơn thực tế 1,8–2,7 lần, đủ để một lô 357 payout không bao giờ vào được block.
+- Settlement chạy được nhưng **chưa gửi thật lần nào** trên mạng: chưa có `RELAYER_PRIVATE_KEY` có số dư. Vì vậy `GET /v1/me` trả `chain.configured = false` và UI tắt nút gửi thay vì báo lỗi sau khi bấm.
 
 ## Backlog phát sinh
 
-- Adapter `pg` cho production (PGlite dùng được cho pilot tới ~10k payout/ngày).
-- Webhook + HMAC.
-- Script đo gas thật trên Arc Testnet.
+- Đặt `DATABASE_URL` (Neon/Supabase) rồi kiểm `PgDatabase` với Postgres thật — hiện chỉ PGlite đã được chạy.
+- Webhook + HMAC khi payout chuyển `confirmed`.
 - Rate limit theo platform.
-- Gửi transaction lên Arc (`PayoutVault` + EIP-3009).
+- `PayoutVault` + EIP-3009 để gộp nhiều người vào một tx.
+- Luồng để người lao động tự khai địa chỉ ví từ link biên nhận (hiện người chưa có ví bị bỏ qua).
 - `.github/workflows/verify.yml` — hiện chỉ verify trên máy dev.

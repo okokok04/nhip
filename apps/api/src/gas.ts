@@ -7,18 +7,32 @@
  */
 
 /**
- * Gas ước lượng cho một payout USDC `transfer`.
+ * Gas cho một `transfer` USDC tới địa chỉ **đã từng giữ** token.
  *
- * `GIẢ ĐỊNH:` 28.000 là **ước lượng**, chưa đo trên Arc Testnet. Đây là con số
- * duy nhất trong repo mà toàn bộ luận điểm kinh tế dựa vào mà chưa có bằng chứng.
- * Khi có key testnet, thay bằng số đo `eth_estimateGas` thật và cập nhật cả
- * `ROLE.md` lẫn `docs/specs/nhip-mvp.md`.
- *
- * Vì sao ước lượng này vẫn dùng được: nó chỉ ảnh hưởng *cách chia lô*, không ảnh
- * hưởng *số tiền*. Chia lô nhỏ hơn mức cần thiết là an toàn; chia lớn hơn mức cho
- * phép mới là nguy hiểm.
+ * Đo thật trên Arc Testnet (`eth_estimateGas`, USDC `0x3600…0000`, 2026-10-27):
+ * 49.338 – 49.950. Lấy cận trên và làm tròn lên 50.000.
  */
-export const GAS_PER_PAYOUT_ESTIMATE = 28_000n;
+export const GAS_PER_PAYOUT_WARM = 50_000n;
+
+/**
+ * Gas cho một `transfer` USDC tới địa chỉ **chưa từng nhận** token (cold account).
+ *
+ * Đo thật trên Arc Testnet: 74.682. Đây là trường hợp phổ biến nhất của sản phẩm —
+ * người lao động gig nhận lương lần đầu bằng ví mới. Ước lượng theo trường hợp đắt
+ * nhất là có chủ đích: chia lô nhỏ hơn mức cần là an toàn, chia lớn hơn mức cho phép
+ * là một lô revert và cả lô người không được trả.
+ */
+export const GAS_PER_PAYOUT_COLD = 75_000n;
+
+/**
+ * Con số dùng để chia lô. Chọn trường hợp **lạnh**, không phải trường hợp trung bình,
+ * vì trần gas phải đúng cho lô tệ nhất.
+ *
+ * Đây từng là 28.000 — một giả định chưa đo, thấp hơn thực tế 1,8–2,7 lần. Nếu
+ * dùng lại con số đó, một lô 357 payout sẽ cần ~26,7M gas, vượt gas limit block
+ * 30M sau khi cộng overhead, và transaction sẽ không bao giờ được đóng vào block.
+ */
+export const GAS_PER_PAYOUT_ESTIMATE = GAS_PER_PAYOUT_COLD;
 
 /**
  * Sàn `maxFeePerGas` của Arc.
@@ -28,3 +42,10 @@ export const GAS_PER_PAYOUT_ESTIMATE = 28_000n;
  * người lao động không được trả.
  */
 export const MIN_MAX_FEE_PER_GAS = 20_000_000_000n;
+
+/**
+ * Gas limit của một transaction trên Arc (đo `eth_getBlockByNumber`, block mới nhất:
+ * 30.000.000). Dùng để kiểm rằng một lô vẫn còn chỗ trong block, không phải để đặt
+ * `gasLimit` cho tx.
+ */
+export const ARC_BLOCK_GAS_LIMIT = 30_000_000n;

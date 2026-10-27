@@ -2,8 +2,10 @@
 
 Hạ tầng trả lương tức thì cho nền tảng gig, chạy trên **Arc** (Circle L1).
 
-> Trạng thái: **lát cắt MVP** — API nhận payout, chống trùng, chia lô theo ngân sách gas.
-> **Chưa** gửi giao dịch lên chain. Xem [docs/specs/nhip-mvp.md](docs/specs/nhip-mvp.md) mục non-goal.
+> Trạng thái: **lát cắt MVP + Settlement Loop** — API nhận payout, chống trùng, chia lô theo ngân sách gas,
+> báo giá phí thật, gửi USDC lên Arc Testnet, đối soát receipt, và biên nhận công khai cho người lao động.
+> Gửi on-chain chỉ bật khi có `RELAYER_PRIVATE_KEY`; không có khoá thì API **chỉ báo giá** và nói rõ như vậy.
+> Xem [docs/specs/nhip-mvp.md](docs/specs/nhip-mvp.md) và [docs/tasks/nhip-mvp.md](docs/tasks/nhip-mvp.md).
 
 ## Vấn đề
 
@@ -50,6 +52,12 @@ Mọi route `/v1/*` cần header `Authorization: Bearer <api_key>`.
 | `POST` | `/v1/batches/from-queue` | Gom payout đang `queued` thành lô (`FOR UPDATE SKIP LOCKED`) |
 | `GET` | `/v1/batches/:id` | Lô kèm danh sách payout |
 | `GET` | `/v1/batches?requestKey=` | Các lô của một request |
+| `POST` | `/v1/settlement/batches/:id/quote` | Báo giá phí thật từ Arc. Ghi 4 cột báo giá vào DB, hiệu lực 5 phút |
+| `POST` | `/v1/settlement/batches/:id/submit` | Broadcast từng `transfer`, trả `202` ngay (B5). Cần `RELAYER_PRIVATE_KEY` |
+| `POST` | `/v1/settlement/batches/:id/confirm` | Đọc receipt, cập nhật `confirmed`/`failed`/`pending` |
+| `GET` | `/v1/settlement/batches` | Các lô đang chờ xử lý (`planned`/`submitting`/`unknown`) |
+| `GET` | `/v1/settlement/batches/:id` | Chi tiết settlement của một lô |
+| `GET` | `/v1/receipts/:claimToken` | **Public, không cần API key.** Biên nhận của một người lao động |
 
 ### Ví dụ
 
@@ -110,9 +118,16 @@ Vi phạm một điều là blocker, không phải nit. `scripts/lint-guards.mjs
 
 ## Chưa làm (và biết là chưa làm)
 
-- Gửi giao dịch lên Arc — cần key testnet có tiền từ [faucet.circle.com](https://faucet.circle.com)
-- **Gas/payout = 28.000 là ước lượng**, chưa đo trên Arc Testnet. Toàn bộ mô hình chi phí dựa vào số này
-- Webhook, `PayoutVault`, EIP-3009 relayer
-- Adapter `pg` cho production (PGlite đủ cho pilot tới ~10k payout/ngày)
-- Rate limit
-- CI (`.github/workflows/verify.yml`) — hiện chỉ verify trên máy dev
+- **`PayoutVault` / EIP-3009** — gộp nhiều người vào một tx. Hiện mỗi payout là một `transfer`
+  riêng, nên bằng chứng thanh toán nằm ở `payouts.tx_hash`, không ở batch.
+- **Webhook + HMAC** — nền tảng chưa được báo khi một payout `confirmed`; hiện phải poll.
+- **Rate limit** theo nền tảng.
+- **CI** (`.github/workflows/verify.yml`) — hiện chỉ verify trên máy dev.
+- **Chưa chạy `pg` với Postgres thật.** `packages/db/src/pg.ts` đã viết nhưng chưa có
+  `DATABASE_URL` để kiểm. Trên Vercel không có `DATABASE_URL` thì PGlite ghi vào `/tmp` và
+  dữ liệu mất khi function khởi động lại — API log cảnh báo, UI mang nhãn "Dữ liệu demo".
+- **Người lao động chưa có ví thì chưa nhận được tiền.** Lô bỏ qua họ và API trả
+  `skippedWithoutAddress`; chưa có luồng để họ tự khai địa chỉ từ link biên nhận.
+
+Gas/payout **đã đo thật** trên Arc Testnet, không còn là giả định: 49.338 (ví ấm) – 74.826
+(ví lạnh), `eth_estimateGas` ngày 2026-10-27. Trần chia lô dùng 75.000 (ví lạnh).
