@@ -1,6 +1,6 @@
 ---
 name: leader
-owns: ROLE.md, CHAT.md, docs/tasks/, docs/specs/, package.json, tsconfig.json, scripts/lint-guards.mjs, scripts/team-check.mjs
+owns: ROLE.md, CHAT.md, DESIGN.md, docs/tasks/, docs/specs/, package.json, tsconfig.json, scripts/lint-guards.mjs, scripts/team-check.mjs
 ---
 
 # Vai: leader

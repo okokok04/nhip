@@ -49,6 +49,8 @@ Vi phạm một điều dưới đây là **blocker**, không phải "nit". `scr
 | **B6** | Trạng thái `unknown` **không bao giờ** được tự retry. | Blocklist revert trên Arc tiêu gas mà không sinh receipt. Retry mù = trả trùng |
 | **B7** | Idempotency là ràng buộc **ở DB** (`UNIQUE`), không phải ở code. | Code có thể race; unique index thì không |
 | **B8** | Chain là source of truth. Postgres là read model, dựng lại được từ block 0. | Indexer chết không được làm mất dữ liệu thật |
+| **B9** | UI **không bao giờ** hiển thị `0` thay cho trạng thái lỗi/chưa tải. Lỗi → `—` + thông báo. | Người vận hành thấy "0 đã trả" sẽ tưởng đã trả xong và đi về |
+| **B10** | Mọi phép tính tiền ở client dùng `BigInt` trên chuỗi micro. Cấm `Number(`, `parseFloat`, `* 1e6` trên đường tiền. | Cùng lý do B1, nhưng ở tầng không có typecheck |
 
 ---
 
@@ -58,11 +60,15 @@ Vi phạm một điều dưới đây là **blocker**, không phải "nit". `scr
 
 | Vai | Sở hữu | Không được chạm |
 |---|---|---|
-| `leader` | `ROLE.md`, `CHAT.md`, `docs/tasks/`, `docs/specs/`, `package.json`, `tsconfig.json` | code trong `packages/`, `apps/` |
+| `leader` | `ROLE.md`, `CHAT.md`, `DESIGN.md`, `docs/tasks/`, `docs/specs/`, `package.json`, `tsconfig.json` | code trong `packages/`, `apps/` |
 | `core-dev` | `packages/core/` | `apps/`, `packages/db/` |
 | `db-dev` | `packages/db/`, `scripts/seed.ts` | `apps/` |
 | `api-dev` | `apps/api/` | `packages/core/` (chỉ đọc) |
+| `web-dev` | `apps/web/` | `apps/api/` (chỉ đọc, cần endpoint mới thì `HANDOFF`) |
 | `qa` | `tests/`, `e2e/`, `scripts/verify-*.mjs` | code sản phẩm (chỉ đọc và báo lỗi) |
+
+> `apps/web` từng không có chủ. Đó là lý do `api-dev` phải tự dựng dashboard trong `msg-0016`
+> — việc đúng nhưng sai vai. Từ `msg-0020`, `apps/web` thuộc `web-dev`.
 
 `scripts/lint-guards.mjs` và `scripts/team-check.mjs` thuộc `leader` — vì chúng định nghĩa luật.
 
@@ -80,6 +86,7 @@ Mỗi vai có một card riêng trong `.agents/roles/`. Card chứa: nhiệm v�
 | `core-dev` | Domain thuần: tiền, địa chỉ, chia lô. Không I/O, không HTTP, không DB |
 | `db-dev` | Schema, migration, truy vấn. Ràng buộc đúng đắn nằm ở DB chứ không ở code |
 | `api-dev` | HTTP layer. Nhận request, validate, gọi core, ghi DB, trả 202 |
+| `web-dev` | Giao diện: landing + dashboard. Đọc API thật, không bịa số, tiền bằng `BigInt` |
 | `qa` | Bẻ gãy sản phẩm trước khi người dùng làm. Không sửa code, chỉ chứng minh lỗi |
 
 ---

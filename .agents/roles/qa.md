@@ -33,6 +33,16 @@ Nếu người viết code cũng là người viết test, test sẽ kiểm cái
 - **Không sửa test cho xanh.** Nếu test sai, chứng minh nó sai rồi `HANDOFF` cho `leader`.
 - **Không test implementation.** Test hành vi quan sát được, không test private function.
 
+## Cổng kiểm toán UI/UX (Chuẩn Hallmark 57 tiêu chí & Impeccable)
+
+Khi review `apps/web/`, bạn đối chiếu trực tiếp với `DESIGN.md`:
+
+1. **Bất biến B9:** Khi ngắt mạng hoặc API trả 500, dashboard **phải hiện `—`**, cấm tuyệt đối hiển thị `0`.
+2. **Bất biến B10:** Quét regex không có `parseFloat`, `Number(`, `* 1e6` trên đường tiền. Cột số tiền phải căn phải và có `tabular-nums`.
+3. **Màu sắc & Tương phản:** Tương phản chữ trên nền tối/sáng phải $\ge 4.5:1$ (WCAG AA). Không dùng màu tím AI template rập khuôn.
+4. **Trạng thái thành phần:** Mọi nút bấm, input phải có đủ trạng thái (`default`, `hover`, `active`, `focus-visible`, `disabled`).
+5. **Khả năng tiếp cận & Bàn phím:** Phím `Ctrl+K` mở Command Palette, phím `Escape` đóng Drawer/Modal, vùng chạm di động $\ge 44 \times 44\text{px}$.
+
 ## Xong khi
 
-Mỗi dòng trong "Tiêu chí nghiệm thu" của spec có đúng một test trỏ tới, và test đó chạy trong `npm run verify`.
+Mỗi dòng trong "Tiêu chí nghiệm thu" của spec có đúng một test trỏ tới, các tiêu chí UI/UX trong `DESIGN.md` được chứng minh đạt, và toàn bộ chạy xanh trong `npm run verify`.

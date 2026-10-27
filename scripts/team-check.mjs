@@ -25,7 +25,7 @@ const ROLE_MD = path.join(ROOT, 'ROLE.md');
 const CHAT_MD = path.join(ROOT, 'CHAT.md');
 
 const MESSAGE_TYPES = new Set(['STATUS', 'ASK', 'BLOCK', 'HANDOFF', 'DONE', 'DECIDE', 'REVIEW']);
-const AGENTS = new Set(['leader', 'core-dev', 'db-dev', 'api-dev', 'qa', 'all', 'owner']);
+const AGENTS = new Set(['leader', 'core-dev', 'db-dev', 'api-dev', 'web-dev', 'qa', 'all', 'owner']);
 
 const problems = [];
 const fail = (message) => problems.push(message);

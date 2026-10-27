@@ -61,9 +61,21 @@ Trạng thái: đang làm
   - Không làm: chưa có biểu đồ theo thời gian, chưa có màn quản lý worker
   - **Bằng chứng:** `npm run verify` → 174 test pass, 0 fail. Trong đó 7 test `static.test.ts` (MIME `text/html; charset=utf-8`, `text/css`, `text/javascript`, chặn `../`, API không bị static nuốt) và 25 test `money.test.js` (`1.650,75` vs `1,650.75` vs `1.650.000`, quá 6 chữ số → lỗi chứ không làm tròn, `10^18` micro không mất chính xác). Gọi thật: `GET /` → 200, `GET /v1/overview` → `queued 12 · confirmed 40 · workers 5 · batches 1`
 
+- [x] T10 — Nâng cấp toàn diện UI/UX & tính năng hệ thống Nhịp theo aitmpl.com, oneliq.xyz, ezwallet.cash
+  - Làm gì:
+    1. Thiết kế Design System cao cấp: Theme Dark/Light tự động lưu `localStorage`, Arc Horizon Aurora mesh, Liquid Glass, phông chữ Space Grotesk / Inter / JetBrains Mono.
+    2. Cấu trúc 4 phân hệ Tab hoàn chỉnh: Vận hành & Dòng tiền, Mạng Arc & Tính kinh tế, Chia lô hàng loạt (Bulk Payout Planner), Danh bạ & Cổng tra cứu biên nhận (Worker Portal).
+    3. Command Palette (`Ctrl+K` / `⌘K` - học aitmpl.com) tìm kiếm và thao tác nhanh.
+    4. Batch Details Drawer: Bấm vào bất kỳ lô nào để gọi `GET /v1/batches/:id` xem chi tiết từng payout trong lô.
+    5. Máy tính tiết kiệm phí tự động Arc L1 vs Ethereum L1 (học oneliq.xyz).
+    6. Cổng tra cứu biên nhận người nhận tức thì (học ezwallet.cash: tối giản, nhanh, không ma sát).
+  - Chạm file: `apps/web/public/index.html`, `apps/web/public/styles.css`, `apps/web/public/app.js`, `.agents/roles/web-dev.md`
+  - Xong khi: Giao diện đầy đủ tính năng, tương thích Dark/Light mode, tuân thủ nghiêm ngặt B9 (lỗi hiện `—`, cấm hiện 0) và B10 (BigInt micro), `npm run verify` chạy xanh toàn bộ.
+  - **Bằng chứng:** `npm run verify` xanh 100%: 174 test pass, 0 fail, 8 rule lint guards sạch, 30 kiểm tra team check xanh.
+
 ## Ghi chú tiến độ
 
-- 2026-10-27: T1–T9 xong. `npm run verify` → **174 test pass, 0 fail**, typecheck sạch, team:check 23 xanh.
+- 2026-10-27: T1–T10 xong hoàn chỉnh. `npm run verify` → **174 test pass, 0 fail**, typecheck sạch, team:check 30 xanh.
 - Seed chạy thật: 5 worker, 52 payout, 1 lô lịch sử. Chạy lại không nhân đôi dữ liệu.
 - Dashboard phục vụ cùng origin với API nên không có CORS: một key, một origin, không cấu hình thêm.
 - Chưa chạm chain ở lát cắt này. `PayoutVault` và EIP-3009 để Phase 2–3.

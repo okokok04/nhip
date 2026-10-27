@@ -1,54 +1,46 @@
 /**
- * Nhịp — bảng điều khiển.
+ * Nhịp — Hệ thống điều khiển & Quản trị dòng tiền chi trả tức thì trên Arc L1.
  *
- * Nguyên tắc: **không có số nào được bịa.** Mọi con số trên màn hình đọc từ
- * `/v1/overview`, `/v1/payouts`, `/v1/workers` — nếu API lỗi thì chỗ đó hiện lỗi,
- * không hiện số 0 giả. Một dashboard trả lương mà hiển thị "0 đã trả" khi mất kết
- * nối sẽ khiến người vận hành tưởng đã trả xong.
- *
- * Toàn bộ số tiền trên đường dây là **chuỗi micro-USDC** (1 USDC = 1.000.000).
- * Module này không bao giờ đổi chúng sang `Number` để tính: 1.000.000.000 micro
- * vẫn nằm trong safe integer hôm nay, nhưng cộng dồn vài tháng thì không, và
- * JavaScript không báo lỗi khi mất chính xác. Mọi phép tính dùng `BigInt`, phần
- * hiển thị dùng `Intl.NumberFormat`.
+ * Nguyên tắc bất biến kỹ thuật (ROLE.md):
+ * - B1/B10: Mọi số tiền là Micro (BigInt), cấm float / Number trên đường tiền.
+ * - B9: Tuyệt đối không hiển thị "0" khi lỗi hoặc chưa tải xong. Phải hiện "—".
+ * - B7: Idempotency đảm bảo tại DB, sinh Idempotency-Key tự động cho mỗi thao tác.
+ * - Không có console.log debug trong code sản phẩm.
  */
 
 import { formatUsdc, parseAmountToMicro } from './money.js';
 
 const STORAGE_KEY = 'nhip.apiKey';
+const THEME_KEY = 'nhip.theme';
 const PAGE_SIZE = 25;
 
 const STATE_LABEL = {
   queued: 'Chờ',
   batched: 'Trong lô',
-  submitted: 'Đã gửi',
-  confirmed: 'Đã trả',
+  submitted: 'Đã gửi Arc',
+  confirmed: 'Đã chi trả',
   failed: 'Lỗi',
 };
 
 const state = {
   apiKey: null,
-  /** Khoá Idempotency đang chờ, gắn với nội dung form đã sinh ra nó. */
-  pendingPayoutKey: null,
-  pendingPayoutSignature: null,
+  theme: 'dark',
+  currentTab: 'tab-overview',
+  activeFilter: 'all',
   nextCursor: null,
   workersById: new Map(),
-  /** Id payout vừa tạo, để tô sáng đúng một dòng sau khi bảng vẽ lại. */
+  workersByExternalId: new Map(),
+  allWorkers: [],
   freshPayoutId: null,
   healthTimer: null,
+  batchesById: new Map(),
 };
 
 const $ = (id) => document.getElementById(id);
 
 /* -------------------------------------------------------------------------
- * DOM helpers
+ * DOM Helpers (Không dùng innerHTML bừa bãi để tránh XSS)
  * ---------------------------------------------------------------------- */
-
-/**
- * Dựng node bằng `textContent`, không bằng `innerHTML`.
- * Lý do: `reference` và `displayName` là dữ liệu người dùng nhập. Nối chuỗi vào
- * HTML là mở đường cho XSS ngay trong trang đang giữ API key.
- */
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -69,21 +61,29 @@ function emptyRow(colSpan, message) {
   return el('tr', {}, el('td', { colspan: colSpan, class: 'empty', text: message }));
 }
 
+function shortenAddress(addr) {
+  if (!addr || typeof addr !== 'string' || addr.length < 10) return addr ?? '—';
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function formatDate(isoString) {
+  if (!isoString) return '—';
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+    });
+  } catch {
+    return isoString;
+  }
+}
+
 /* -------------------------------------------------------------------------
- * Tiền
+ * HTTP Client
  * ---------------------------------------------------------------------- */
-
-const vnNumber = new Intl.NumberFormat('vi-VN');
-
-// `formatUsdc` / `parseAmountToMicro` nằm ở `money.js` — có test riêng trong
-// `money.test.js`. Không chép lại ở đây: hai bản sao của logic tiền là hai chỗ
-// có thể lệch nhau, và chỗ lệch đó không hiện ra trên màn hình.
-
-
-/* -------------------------------------------------------------------------
- * HTTP
- * ---------------------------------------------------------------------- */
-
 class ApiError extends Error {
   constructor(message, { code, status, details, requestId } = {}) {
     super(message);
@@ -108,7 +108,7 @@ async function api(path, options = {}) {
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
   } catch {
-    throw new ApiError('Không kết nối được tới API. Server đã chạy chưa?', { status: 0 });
+    throw new ApiError('Không thể kết nối máy chủ API. Kiểm tra xem server đã khởi chạy chưa.', { status: 0 });
   }
 
   const text = await response.text();
@@ -122,526 +122,966 @@ async function api(path, options = {}) {
   }
 
   if (!response.ok) {
-    const info = payload?.error ?? {};
-    throw new ApiError(info.message ?? `HTTP ${response.status}`, {
-      code: info.code,
+    const err = payload?.error;
+    const message = err?.message ?? `Yêu cầu thất bại (${response.status})`;
+    throw new ApiError(message, {
+      code: err?.code,
       status: response.status,
-      details: info.details,
-      requestId: info.requestId,
+      details: err?.details,
+      requestId: err?.requestId,
     });
   }
 
-  return { status: response.status, body: payload };
+  return payload;
 }
 
 /* -------------------------------------------------------------------------
- * Toast
+ * Toast Notification System
  * ---------------------------------------------------------------------- */
-
-function toast(tone, title, body, { timeout = 6000 } = {}) {
+function toast(message, type = 'info') {
   const container = $('toasts');
+  if (!container) return;
+
+  const icons = { success: '✓', error: '✕', info: 'ℹ' };
   const node = el(
     'div',
-    { class: 'toast', role: 'alert' },
-    el('p', { class: 'toast__title', text: title }),
-    body ? el('p', { class: 'toast__body', text: body }) : null,
+    { class: `toast toast--${type}` },
+    el('span', { class: 'toast__icon', text: icons[type] ?? '•' }),
+    el('span', { class: 'toast__text', text: message }),
   );
-  node.dataset.tone = tone;
-  container.append(node);
 
-  const remove = () => {
-    if (node.dataset.leaving === 'true') return;
-    node.dataset.leaving = 'true';
-    node.addEventListener('animationend', () => node.remove(), { once: true });
-    // Lưới an toàn: nếu animation bị tắt (prefers-reduced-motion), sự kiện không bắn.
-    window.setTimeout(() => node.remove(), 400);
-  };
-  window.setTimeout(remove, timeout);
-  node.addEventListener('click', remove);
-}
-
-function describeError(error) {
-  if (!(error instanceof ApiError)) return 'Lỗi không xác định.';
-  const parts = [error.message];
-  const fields = error.details?.fields;
-  if (Array.isArray(fields) && fields.length > 0) {
-    parts.push(fields.map((f) => `${f.field}: ${f.message}`).join(' '));
-  }
-  const rejected = error.details?.rejected;
-  if (Array.isArray(rejected) && rejected.length > 0) {
-    parts.push(`${rejected.length} dòng bị từ chối.`);
-  }
-  if (error.requestId) parts.push(`Mã lỗi: ${error.requestId}`);
-  return parts.join(' ');
+  container.appendChild(node);
+  setTimeout(() => {
+    node.style.opacity = '0';
+    node.style.transform = 'translateY(10px)';
+    node.style.transition = 'all 0.25s ease';
+    setTimeout(() => node.remove(), 260);
+  }, 4200);
 }
 
 /* -------------------------------------------------------------------------
- * Kết nối
+ * Theme Management (Dark / Light)
  * ---------------------------------------------------------------------- */
+function initTheme() {
+  const stored = localStorage.getItem(THEME_KEY);
+  const preferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  state.theme = stored ?? preferred;
+  applyTheme(state.theme);
 
-function showGate(message) {
-  $('shell').hidden = true;
-  $('gate').hidden = false;
-  const error = $('gate-error');
-  error.textContent = message ?? '';
-  $('api-key-input').focus();
-  stopHealthTimer();
-}
-
-function showShell() {
-  $('gate').hidden = true;
-  $('shell').hidden = false;
-}
-
-function setGateBusy(busy) {
-  const button = $('gate-submit');
-  button.disabled = busy;
-  button.dataset.busy = busy ? 'true' : 'false';
-}
-
-/**
- * Xác thực key bằng `/v1/me` thay vì đoán theo định dạng.
- * Chỉ có server mới biết key nào tồn tại; kiểm ở client chỉ tạo cảm giác an toàn.
- */
-async function connect({ fromStorage }) {
-  setGateBusy(true);
-  $('gate-error').textContent = '';
-
-  try {
-    const me = await api('/v1/me');
-    localStorage.setItem(STORAGE_KEY, state.apiKey);
-    showShell();
-    paintPlatform(me.body);
-    await refresh({ initial: true });
-    startHealthTimer();
-    void pingHealth();
-  } catch (error) {
-    const message = error instanceof ApiError ? error.message : 'Không kết nối được.';
-    if (fromStorage) {
-      // Key cũ hỏng: xoá để lần mở sau không lặp lại vòng lỗi này.
-      localStorage.removeItem(STORAGE_KEY);
-      state.apiKey = null;
-      showGate(`${message} Nhập key mới từ \`npm run seed\`.`);
-    } else {
-      $('gate-error').textContent = message;
-    }
-  } finally {
-    setGateBusy(false);
+  const toggleBtn = $('theme-toggle');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem(THEME_KEY, state.theme);
+      applyTheme(state.theme);
+      toast(`Đã chuyển sang giao diện ${state.theme === 'dark' ? 'Tối' : 'Sáng'}`, 'info');
+    });
   }
 }
 
-function paintPlatform(me) {
-  const pill = $('platform-pill');
-  pill.textContent = me.name;
-  pill.title = `Nền tảng ${me.id} · tối đa ${me.maxPayoutsPerBatch} payout/lô · chu kỳ ${me.batchIntervalMs} ms`;
+function applyTheme(theme) {
+  const root = document.documentElement;
+  root.classList.remove('dark', 'light');
+  root.classList.add(theme);
 }
 
 /* -------------------------------------------------------------------------
- * Health
+ * Tab Navigation System
  * ---------------------------------------------------------------------- */
-
-async function pingHealth() {
-  const pill = $('health-pill');
-  const text = $('health-text');
-  try {
-    const { body } = await api('/health');
-    const ok = body?.status === 'ok';
-    pill.dataset.state = ok ? 'ok' : 'bad';
-    text.textContent = ok ? 'API ổn định' : 'API suy giảm';
-  } catch {
-    pill.dataset.state = 'bad';
-    text.textContent = 'Mất kết nối';
-  }
-}
-
-function startHealthTimer() {
-  stopHealthTimer();
-  state.healthTimer = window.setInterval(() => {
-    // Tab ẩn thì không ping: đừng giữ server thức vì một tab bị bỏ quên.
-    if (!document.hidden) void pingHealth();
-  }, 30_000);
-}
-
-function stopHealthTimer() {
-  if (state.healthTimer !== null) {
-    window.clearInterval(state.healthTimer);
-    state.healthTimer = null;
-  }
-}
-
-/* -------------------------------------------------------------------------
- * Tải dữ liệu
- * ---------------------------------------------------------------------- */
-
-async function refresh({ initial = false } = {}) {
-  const kpis = document.querySelector('.kpis');
-
-  await Promise.all([
-    (async () => {
-      kpis.dataset.loading = 'true';
-      try {
-        const [overview, workers] = await Promise.all([
-          api(`/v1/overview?recentBatches=8`),
-          initial || state.workersById.size === 0 ? api('/v1/workers?limit=200') : null,
-        ]);
-        if (workers) paintWorkers(workers.body.workers);
-        paintOverview(overview.body);
-        paintBatches(overview.body.recentBatches);
-      } catch (error) {
-        toast('bad', 'Không tải được tổng quan', describeError(error));
-        paintOverviewError();
-      } finally {
-        delete kpis.dataset.loading;
-      }
-    })(),
-    loadPayouts({ reset: true }),
-  ]);
-}
-
-function paintOverview(overview) {
-  const total =
-    overview.queued.count + overview.batched.count + overview.confirmed.count + overview.failed.count;
-
-  $('kpi-queued-count').textContent = vnNumber.format(overview.queued.count);
-  $('kpi-queued-amount').textContent = formatUsdc(overview.queued.totalMicro);
-  $('kpi-batched-count').textContent = vnNumber.format(overview.batched.count);
-  $('kpi-batched-amount').textContent = formatUsdc(overview.batched.totalMicro);
-  $('kpi-confirmed-count').textContent = vnNumber.format(overview.confirmed.count);
-  $('kpi-confirmed-amount').textContent = formatUsdc(overview.confirmed.totalMicro);
-
-  const rate = overview.successRate;
-  $('kpi-rate').textContent = rate === null ? '—' : `${(rate * 100).toFixed(1)}%`;
-  $('kpi-workers').textContent = vnNumber.format(overview.workers);
-  $('kpi-batches').textContent = vnNumber.format(overview.batches);
-
-  const share = (count) => (total === 0 ? 0 : Math.round((count / total) * 100));
-  setBar('kpi--queued', share(overview.queued.count));
-  setBar('kpi--batched', share(overview.batched.count));
-  setBar('kpi--confirmed', share(overview.confirmed.count));
-
-  const rateBar = $('kpi-rate-bar');
-  rateBar.style.width = `${rate === null ? 0 : Math.round(rate * 100)}%`;
-
-  if (overview.failed.count > 0) {
-    $('foot-note').textContent = `${vnNumber.format(overview.failed.count)} payout lỗi đang cần xử lý.`;
-  }
-}
-
-function setBar(cardClass, percent) {
-  const card = document.querySelector(`.${cardClass}`);
-  const bar = card?.querySelector('.kpi__bar > span');
-  if (bar) bar.style.width = `${percent}%`;
-}
-
-function paintOverviewError() {
-  for (const id of [
-    'kpi-queued-count',
-    'kpi-batched-count',
-    'kpi-confirmed-count',
-    'kpi-rate',
-  ]) {
-    $(id).textContent = '—';
-  }
-  $('batches-body').replaceChildren(emptyRow(5, 'Không tải được dữ liệu.'));
-}
-
-function paintBatches(batches) {
-  const body = $('batches-body');
-  if (!Array.isArray(batches) || batches.length === 0) {
-    body.replaceChildren(emptyRow(5, 'Chưa có lô nào. Bấm "Gom lô hàng đợi" để tạo.'));
-    return;
-  }
-
-  body.replaceChildren(
-    ...batches.map((batch) =>
-      el(
-        'tr',
-        {},
-        el('td', {}, el('span', { class: 'id', text: shortId(batch.id) })),
-        el('td', {}, stateBadge(batch.state)),
-        el('td', { class: 'num', text: vnNumber.format(batch.payoutCount) }),
-        el('td', { class: 'num amount', text: formatUsdc(batch.total_micro) }),
-        el('td', { class: 'id', text: formatTime(batch.created_at) }),
-      ),
-    ),
-  );
-}
-
-function paintWorkers(workers) {
-  state.workersById = new Map(workers.map((worker) => [worker.id, worker]));
-
-  const select = $('worker-select');
-  const previous = select.value;
-  select.replaceChildren();
-
-  if (workers.length === 0) {
-    select.append(el('option', { value: '', text: 'Chưa có người lao động — chạy npm run seed' }));
-    return;
-  }
-
-  select.append(el('option', { value: '', text: 'Chọn người nhận' }));
-  for (const worker of workers) {
-    const label = worker.displayName ? `${worker.displayName} · ${worker.externalId}` : worker.externalId;
-    select.append(el('option', { value: worker.id, text: label }));
-  }
-  if (previous && state.workersById.has(previous)) select.value = previous;
-}
-
-async function loadPayouts({ reset }) {
-  const body = $('payouts-body');
-  const button = $('load-more');
-
-  if (reset) {
-    body.replaceChildren(emptyRow(6, 'Đang tải…'));
-    state.nextCursor = null;
-  }
-
-  button.disabled = true;
-  try {
-    const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
-    if (!reset && state.nextCursor) query.set('cursor', state.nextCursor);
-
-    const { body: page } = await api(`/v1/payouts?${query}`);
-    const rows = page.payouts.map(payoutRow);
-
-    if (reset) body.replaceChildren();
-    body.append(...rows);
-    if (body.children.length === 0) {
-      body.replaceChildren(emptyRow(6, 'Chưa có payout nào.'));
-    }
-
-    state.nextCursor = page.nextCursor;
-    button.hidden = !page.nextCursor;
-  } catch (error) {
-    if (reset) body.replaceChildren(emptyRow(6, 'Không tải được payout.'));
-    toast('bad', 'Không tải được payout', describeError(error));
-  } finally {
-    button.disabled = false;
-    // Chỉ tô sáng một lần: giữ lại thì mọi lần làm mới đều nháy.
-    state.freshPayoutId = null;
-  }
-}
-
-function payoutRow(payout) {
-  const worker = state.workersById.get(payout.workerId);
-  const workerLabel = worker ? worker.displayName ?? worker.externalId : null;
-
-  const row = el(
-    'tr',
-    {},
-    el('td', {}, el('span', { class: 'id', text: shortId(payout.id) })),
-    el(
-      'td',
-      {},
-      workerLabel
-        ? el('span', { text: workerLabel })
-        : el('span', { class: 'id', text: shortId(payout.workerId) }),
-    ),
-    el('td', { class: 'num amount', text: formatUsdc(payout.amount_micro) }),
-    el('td', {}, stateBadge(payout.state)),
-    el('td', {}, el('span', { class: 'ref', title: payout.reference ?? '', text: payout.reference ?? '—' })),
-    el('td', { class: 'id', text: formatTime(payout.created_at) }),
-  );
-  if (payout.id === state.freshPayoutId) row.dataset.fresh = 'true';
-  return row;
-}
-
-function stateBadge(value) {
-  const node = el('span', { class: 'state', text: STATE_LABEL[value] ?? value });
-  node.dataset.state = value;
-  return node;
-}
-
-/** Id đầy đủ dài 36 ký tự; bảng cần đọc được, tooltip giữ nguyên bản. */
-function shortId(id) {
-  if (typeof id !== 'string') return '—';
-  const separator = id.indexOf('_');
-  if (separator < 0) return id;
-  const prefix = id.slice(0, separator);
-  const rest = id.slice(separator + 1);
-  return `${prefix}_${rest.slice(0, 6)}…${rest.slice(-4)}`;
-}
-
-const timeFormat = new Intl.DateTimeFormat('vi-VN', {
-  day: '2-digit',
-  month: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
-function formatTime(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '—';
-  return timeFormat.format(date);
-}
-
-/* -------------------------------------------------------------------------
- * Hành động
- * ---------------------------------------------------------------------- */
-
-async function withBusy(button, work) {
-  if (button.dataset.busy === 'true') return;
-  button.dataset.busy = 'true';
-  button.disabled = true;
-  try {
-    await work();
-  } finally {
-    delete button.dataset.busy;
-    button.disabled = false;
-  }
-}
-
-async function submitPayout(event) {
-  event.preventDefault();
-  const button = $('payout-submit');
-  const select = $('worker-select');
-  const amountInput = $('amount-input');
-  const referenceInput = $('reference-input');
-  const help = $('amount-help');
-
-  const workerId = select.value;
-  if (!workerId) {
-    toast('bad', 'Chưa chọn người nhận', 'Chọn một người lao động trong danh sách.');
-    select.focus();
-    return;
-  }
-
-  const parsed = parseAmountToMicro(amountInput.value);
-  if (parsed.error) {
-    amountInput.setAttribute('aria-invalid', 'true');
-    help.dataset.tone = 'bad';
-    help.textContent = parsed.error;
-    amountInput.focus();
-    return;
-  }
-  amountInput.removeAttribute('aria-invalid');
-  help.dataset.tone = '';
-  help.textContent = 'Tối đa 6 chữ số thập phân.';
-
-  const reference = referenceInput.value.trim();
-  // Cùng nội dung → cùng key. Nhờ vậy bấm lại sau khi timeout trả về 200
-  // `duplicate: true` thay vì tạo payout thứ hai.
-  const signature = `${workerId}|${parsed.micro}|${reference}`;
-  if (state.pendingPayoutSignature !== signature || !state.pendingPayoutKey) {
-    state.pendingPayoutKey = crypto.randomUUID();
-    state.pendingPayoutSignature = signature;
-  }
-
-  await withBusy(button, async () => {
-    try {
-      const { status, body } = await api('/v1/payouts', {
-        method: 'POST',
-        headers: { 'Idempotency-Key': state.pendingPayoutKey },
-        body: {
-          workerId,
-          amount_micro: parsed.micro,
-          ...(reference ? { reference } : {}),
-        },
-      });
-
-      state.pendingPayoutKey = null;
-      state.pendingPayoutSignature = null;
-      state.freshPayoutId = body.id;
-
-      const amount = formatUsdc(body.amount_micro);
-      if (body.duplicate) {
-        toast('ok', 'Payout đã tồn tại', `${amount} USDC · ${shortId(body.id)} — request trước đã tới đích (HTTP ${status}).`);
-      } else {
-        toast('ok', 'Đã vào hàng đợi', `${amount} USDC cho ${workerLabelFor(workerId)}.`);
-      }
-
-      amountInput.value = '';
-      referenceInput.value = '';
-      await refresh();
-    } catch (error) {
-      // Giữ nguyên key: lần bấm tiếp theo phải là retry của cùng request này.
-      toast('bad', 'Không tạo được payout', describeError(error));
-    }
+function initTabs() {
+  const tabs = document.querySelectorAll('.nav-tab');
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const targetId = tab.dataset.tab;
+      if (!targetId) return;
+      switchTab(targetId);
+    });
   });
 }
 
-function workerLabelFor(workerId) {
-  const worker = state.workersById.get(workerId);
-  return worker?.displayName ?? worker?.externalId ?? shortId(workerId);
+function switchTab(targetId) {
+  state.currentTab = targetId;
+
+  document.querySelectorAll('.nav-tab').forEach((t) => {
+    t.classList.toggle('nav-tab--active', t.dataset.tab === targetId);
+  });
+
+  document.querySelectorAll('.tab-pane').forEach((pane) => {
+    pane.classList.toggle('tab-pane--active', pane.id === targetId);
+  });
 }
 
-async function collectQueue() {
-  const button = $('run-batcher');
-  await withBusy(button, async () => {
-    try {
-      const { status, body } = await api('/v1/batches/from-queue', { method: 'POST' });
+/* -------------------------------------------------------------------------
+ * Command Palette (Ctrl+K / Cmd+K - học aitmpl.com)
+ * ---------------------------------------------------------------------- */
+function initCommandPalette() {
+  const backdrop = $('cmd-backdrop');
+  const trigger = $('cmd-trigger');
+  const input = $('cmd-search-input');
+  const list = $('cmd-list');
 
-      if (status === 200 || body.payoutCount === 0) {
-        toast('ok', 'Hàng đợi rỗng', 'Không có payout nào đang chờ để gom.');
+  if (!backdrop || !input || !list) return;
+
+  function openCmd() {
+    backdrop.hidden = false;
+    input.value = '';
+    filterCmdItems('');
+    input.focus();
+  }
+
+  function closeCmd() {
+    backdrop.hidden = true;
+  }
+
+  if (trigger) trigger.addEventListener('click', openCmd);
+
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeCmd();
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      if (backdrop.hidden) openCmd();
+      else closeCmd();
+    } else if (e.key === 'Escape' && !backdrop.hidden) {
+      closeCmd();
+    }
+  });
+
+  input.addEventListener('input', () => {
+    filterCmdItems(input.value.trim().toLowerCase());
+  });
+
+  function filterCmdItems(query) {
+    const items = list.querySelectorAll('.cmd-item');
+    items.forEach((item) => {
+      const text = item.textContent.toLowerCase();
+      item.hidden = query.length > 0 && !text.includes(query);
+    });
+  }
+
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('.cmd-item');
+    if (!btn) return;
+    const cmd = btn.dataset.cmd;
+    closeCmd();
+    executeCommand(cmd);
+  });
+}
+
+function executeCommand(cmd) {
+  if (cmd === 'run-batcher') {
+    const btn = $('run-batcher');
+    if (btn) btn.click();
+  } else if (cmd === 'refresh') {
+    const btn = $('refresh');
+    if (btn) btn.click();
+  } else if (cmd === 'toggle-theme') {
+    const btn = $('theme-toggle');
+    if (btn) btn.click();
+  } else if (cmd?.startsWith('tab-')) {
+    switchTab(cmd);
+  } else if (cmd === 'disconnect') {
+    disconnect();
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Batch Details Drawer
+ * ---------------------------------------------------------------------- */
+function initBatchDrawer() {
+  const backdrop = $('drawer-backdrop');
+  const drawer = $('batch-drawer');
+  const closeBtn = $('drawer-close');
+
+  function closeDrawer() {
+    if (backdrop) backdrop.hidden = true;
+    if (drawer) drawer.hidden = true;
+  }
+
+  if (backdrop) backdrop.addEventListener('click', closeDrawer);
+  if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && drawer && !drawer.hidden) closeDrawer();
+  });
+}
+
+async function openBatchDrawer(batchId) {
+  const backdrop = $('drawer-backdrop');
+  const drawer = $('batch-drawer');
+  if (!backdrop || !drawer) return;
+
+  backdrop.hidden = false;
+  drawer.hidden = false;
+
+  $('drawer-batch-id').textContent = batchId;
+  $('drawer-batch-state').textContent = 'Đang tải…';
+  $('drawer-batch-count').textContent = '—';
+  $('drawer-batch-total').textContent = '—';
+  $('drawer-batch-gas').textContent = '—';
+  $('drawer-batch-tx').textContent = '—';
+
+  const tbody = $('drawer-payouts-body');
+  tbody.replaceChildren(emptyRow(4, 'Đang tải chi tiết các giao dịch trong lô…'));
+
+  try {
+    const data = await api(`/v1/batches/${encodeURIComponent(batchId)}`);
+    $('drawer-batch-state').textContent = STATE_LABEL[data.state] ?? data.state;
+    $('drawer-batch-count').textContent = `${data.payoutCount} khoản`;
+    $('drawer-batch-total').textContent = `${formatUsdc(data.total_micro)} USDC`;
+    $('drawer-batch-gas').textContent = `${(data.estimatedGas ?? 0).toLocaleString('vi-VN')} gas`;
+    $('drawer-batch-tx').textContent = data.txHash ?? 'Chưa gửi lên chain (MVP)';
+
+    if (!data.payouts || data.payouts.length === 0) {
+      tbody.replaceChildren(emptyRow(4, 'Lô này không có payout nào.'));
+      return;
+    }
+
+    const rows = data.payouts.map((p) => {
+      const worker = state.workersById.get(p.workerId);
+      const recipientName = worker?.displayName ?? worker?.externalId ?? shortenAddress(p.workerId);
+
+      return el(
+        'tr',
+        {},
+        el('td', { class: 'mono', text: p.id }),
+        el('td', { text: recipientName }),
+        el('td', { class: 'num', text: formatUsdc(p.amount_micro) }),
+        el(
+          'td',
+          {},
+          el('span', { class: `status-pill status-pill--${p.state}`, text: STATE_LABEL[p.state] ?? p.state }),
+        ),
+      );
+    });
+
+    tbody.replaceChildren(...rows);
+  } catch (err) {
+    $('drawer-batch-state').textContent = '—';
+    tbody.replaceChildren(emptyRow(4, `Lỗi tải chi tiết: ${err.message}`));
+    toast(`Không tải được chi tiết lô: ${err.message}`, 'error');
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Arc Savings Calculator (học oneliq.xyz)
+ * ---------------------------------------------------------------------- */
+function initSavingsCalculator() {
+  const slider = $('calc-slider');
+  const countDisplay = $('calc-count-display');
+  const ethCost = $('calc-eth-cost');
+  const arcCost = $('calc-arc-cost');
+  const saved = $('calc-saved');
+
+  if (!slider) return;
+
+  function update() {
+    const count = parseInt(slider.value, 10) || 5000;
+    countDisplay.textContent = `${count.toLocaleString('vi-VN')} người/ngày`;
+
+    // Ethereum: ~$2.52 gas/payout
+    const ethYearly = Math.round(count * 2.52 * 365);
+    // Arc (Circle L1): ~$0.0006 gas/payout
+    const arcYearly = Math.round(count * 0.0006 * 365);
+    const savedYearly = ethYearly - arcYearly;
+
+    ethCost.textContent = `$${ethYearly.toLocaleString('vi-VN')}`;
+    arcCost.textContent = `$${arcYearly.toLocaleString('vi-VN')}`;
+    saved.textContent = `$${savedYearly.toLocaleString('vi-VN')}`;
+  }
+
+  slider.addEventListener('input', update);
+  update();
+}
+
+/* -------------------------------------------------------------------------
+ * Bulk Payout Planner (học oneliq.xyz)
+ * ---------------------------------------------------------------------- */
+function initBulkPlanner() {
+  const sampleBtn = $('bulk-load-sample');
+  const previewBtn = $('bulk-preview-btn');
+  const submitBtn = $('bulk-submit-btn');
+  const textarea = $('bulk-input');
+  const validCountEl = $('bulk-valid-count');
+  const invalidCountEl = $('bulk-invalid-count');
+  const totalAmountEl = $('bulk-total-amount');
+  const batchesEstEl = $('bulk-batches-est');
+  const previewBody = $('bulk-preview-body');
+
+  let parsedPayouts = [];
+
+  if (sampleBtn && textarea) {
+    sampleBtn.addEventListener('click', () => {
+      const sampleWorkers = state.allWorkers.slice(0, 5);
+      if (sampleWorkers.length > 0) {
+        textarea.value = sampleWorkers
+          .map((w, idx) => `${w.externalId},${(15 + idx * 7.5).toFixed(2)},Chuyến xe Grab #${8840 + idx}`)
+          .join('\n');
+      } else {
+        textarea.value = `driver-001,15.50,Chuyến xe Grab #8891\ndriver-002,42.00,Chuyến xe Grab #8892\ndriver-003,120.75,Thưởng năng suất tuần\ndriver-004,18.00,Giao đồ ăn Now\ndriver-005,95.25,Cuốc xe sân bay`;
+      }
+      previewBtn.click();
+    });
+  }
+
+  if (previewBtn && textarea) {
+    previewBtn.addEventListener('click', () => {
+      const text = textarea.value.trim();
+      if (!text) {
+        toast('Vui lòng nhập danh sách thanh toán', 'error');
         return;
       }
 
-      const total = formatUsdc(body.total_micro);
-      toast(
-        'ok',
-        `Đã tạo ${body.batches.length} lô`,
-        `${vnNumber.format(body.payoutCount)} payout · ${total} USDC. Gửi lên Arc là bước tiếp theo.`,
-      );
-      await refresh();
-    } catch (error) {
-      toast('bad', 'Không gom được lô', describeError(error));
-    }
-  });
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      let valid = 0;
+      let invalid = 0;
+      let totalMicro = 0n;
+      parsedPayouts = [];
+
+      const rows = lines.map((line, idx) => {
+        const parts = line.split(',').map((p) => p.trim());
+        const idOrExt = parts[0] ?? '';
+        const rawAmount = parts[1] ?? '';
+        const ref = parts[2] ?? '';
+
+        const worker = state.workersByExternalId.get(idOrExt) ?? state.workersById.get(idOrExt);
+        const workerId = worker ? worker.id : idOrExt;
+        const parsed = parseAmountToMicro(rawAmount);
+
+        let isOk = true;
+        let errMsg = '';
+
+        if (!idOrExt) {
+          isOk = false;
+          errMsg = 'Thiếu mã người nhận';
+        } else if (parsed.error) {
+          isOk = false;
+          errMsg = parsed.error;
+        }
+
+        if (isOk) {
+          valid++;
+          totalMicro += BigInt(parsed.micro);
+          parsedPayouts.push({
+            workerId,
+            amount_micro: parsed.micro,
+            reference: ref || undefined,
+          });
+        } else {
+          invalid++;
+        }
+
+        return el(
+          'tr',
+          {},
+          el('td', { class: 'mono', text: idx + 1 }),
+          el('td', { text: worker?.displayName ?? idOrExt }),
+          el('td', { class: 'num', text: isOk ? formatUsdc(parsed.micro) : rawAmount }),
+          el(
+            'td',
+            {},
+            el(
+              'span',
+              {
+                class: `status-pill ${isOk ? 'status-pill--confirmed' : 'status-pill--failed'}`,
+                text: isOk ? 'Hợp lệ' : errMsg,
+              },
+            ),
+          ),
+        );
+      });
+
+      previewBody.replaceChildren(...rows);
+      validCountEl.textContent = String(valid);
+      invalidCountEl.textContent = String(invalid);
+      totalAmountEl.textContent = formatUsdc(totalMicro.toString());
+      // Giả định trần gas 10M với 28.000 gas/payout ~ 350 payouts/lô
+      batchesEstEl.textContent = String(Math.ceil(valid / 350) || (valid > 0 ? 1 : 0));
+
+      submitBtn.disabled = valid === 0;
+      if (invalid > 0) {
+        toast(`Phát hiện ${invalid} dòng có lỗi. Chỉ các dòng hợp lệ mới được đưa vào lô.`, 'error');
+      } else {
+        toast(`Đã kiểm toán thành công ${valid} dòng hợp lệ.`, 'success');
+      }
+    });
+  }
+
+  if (submitBtn) {
+    submitBtn.addEventListener('click', async () => {
+      if (parsedPayouts.length === 0) return;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Đang tạo lô…';
+
+      try {
+        const idempotencyKey = `bulk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const res = await api('/v1/batches', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': idempotencyKey },
+          body: { payouts: parsedPayouts },
+        });
+
+        toast(`Đã tạo thành công ${res.batches?.length ?? 1} lô chi trả!`, 'success');
+        textarea.value = '';
+        validCountEl.textContent = '0';
+        invalidCountEl.textContent = '0';
+        totalAmountEl.textContent = '0,00';
+        batchesEstEl.textContent = '0';
+        previewBody.replaceChildren(emptyRow(4, 'Đã gửi thành công vào hệ thống.'));
+
+        await refreshAll();
+        switchTab('tab-overview');
+      } catch (err) {
+        toast(`Lỗi tạo lô hàng loạt: ${err.message}`, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '⚡ Tạo lô & Đưa vào hàng đợi';
+      }
+    });
+  }
 }
 
 /* -------------------------------------------------------------------------
- * Wiring
+ * Worker & Recipient Portal (ezwallet.cash style)
  * ---------------------------------------------------------------------- */
+function initWorkerPortal() {
+  const lookupForm = $('worker-lookup-form');
+  const lookupInput = $('worker-lookup-input');
+  const portalResult = $('portal-result');
 
-function wire() {
-  $('gate-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const value = $('api-key-input').value.trim();
-    if (!value) {
-      $('gate-error').textContent = 'Dán API key vào ô trên.';
+  if (lookupForm && lookupInput) {
+    lookupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const query = lookupInput.value.trim();
+      if (!query) return;
+
+      try {
+        const worker = state.workersByExternalId.get(query) ?? state.workersById.get(query);
+        let workerData = worker;
+
+        if (!workerData) {
+          try {
+            workerData = await api(`/v1/workers/${encodeURIComponent(query)}?externalId=${encodeURIComponent(query)}`);
+          } catch {
+            // Thử query theo id
+            workerData = await api(`/v1/workers/${encodeURIComponent(query)}`);
+          }
+        }
+
+        if (!workerData) {
+          toast('Không tìm thấy người lao động với mã này.', 'error');
+          return;
+        }
+
+        $('lookup-name').textContent = workerData.displayName || 'Người lao động';
+        $('lookup-ext-id').textContent = `Mã: ${workerData.externalId}`;
+        $('lookup-address').textContent = workerData.address
+          ? `Ví Arc: ${workerData.address}`
+          : 'Chưa liên kết địa chỉ ví';
+
+        // Lấy lịch sử payout của người này
+        const payoutsRes = await api(`/v1/payouts?workerId=${encodeURIComponent(workerData.id)}&limit=50`);
+        const payouts = payoutsRes.payouts ?? [];
+
+        let totalConfirmed = 0n;
+        let totalPending = 0n;
+
+        for (const p of payouts) {
+          if (p.state === 'confirmed') totalConfirmed += BigInt(p.amount_micro);
+          else if (p.state === 'queued' || p.state === 'batched') totalPending += BigInt(p.amount_micro);
+        }
+
+        $('lookup-total-confirmed').textContent = `${formatUsdc(totalConfirmed.toString())} USDC`;
+        $('lookup-total-pending').textContent = `${formatUsdc(totalPending.toString())} USDC`;
+
+        const receiptsList = $('lookup-receipts-list');
+        if (payouts.length === 0) {
+          receiptsList.replaceChildren(
+            el('div', { class: 'empty', text: 'Chưa có biên nhận chi trả nào cho người này.' }),
+          );
+        } else {
+          const items = payouts.map((p) =>
+            el(
+              'div',
+              { class: 'receipt-item glass' },
+              el(
+                'div',
+                { class: 'receipt-item__left' },
+                el('span', { class: 'receipt-item__ref', text: p.reference || 'Thanh toán lương gig' }),
+                el('span', { class: 'receipt-item__date mono', text: `${formatDate(p.created_at)} · ID: ${p.id}` }),
+              ),
+              el(
+                'div',
+                { class: 'receipt-item__right' },
+                el('span', { class: 'receipt-item__amount mono', text: `+${formatUsdc(p.amount_micro)} USDC` }),
+                el('div', {}, el('span', { class: `status-pill status-pill--${p.state}`, text: STATE_LABEL[p.state] ?? p.state })),
+              ),
+            ),
+          );
+          receiptsList.replaceChildren(...items);
+        }
+
+        portalResult.hidden = false;
+        toast(`Đã tải thông tin của ${workerData.displayName || workerData.externalId}`, 'success');
+      } catch (err) {
+        toast(`Lỗi tra cứu: ${err.message}`, 'error');
+      }
+    });
+  }
+
+  // Thêm người nhận mới
+  const createForm = $('create-worker-form');
+  if (createForm) {
+    createForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const extId = $('new-worker-ext-id').value.trim();
+      const name = $('new-worker-name').value.trim();
+      const address = $('new-worker-address').value.trim();
+
+      if (!extId) {
+        toast('Mã định danh nội bộ không được để trống.', 'error');
+        return;
+      }
+
+      try {
+        const body = { externalId: extId };
+        if (name) body.displayName = name;
+        if (address) body.address = address;
+
+        const res = await api('/v1/workers', {
+          method: 'POST',
+          body,
+        });
+
+        toast(`Đã lưu người nhận ${res.displayName || res.externalId} thành công!`, 'success');
+        createForm.reset();
+        await loadWorkers();
+      } catch (err) {
+        toast(`Lỗi thêm người nhận: ${err.message}`, 'error');
+      }
+    });
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Data Loaders: Workers, Payouts, Batches, Overview
+ * ---------------------------------------------------------------------- */
+async function loadWorkers() {
+  try {
+    const res = await api('/v1/workers?limit=200');
+    state.allWorkers = res.workers ?? [];
+    state.workersById.clear();
+    state.workersByExternalId.clear();
+
+    const select = $('worker-select');
+    select.replaceChildren(el('option', { value: '' }, '-- Chọn người nhận tiền --'));
+
+    for (const w of state.allWorkers) {
+      state.workersById.set(w.id, w);
+      state.workersByExternalId.set(w.externalId, w);
+
+      const label = `${w.displayName || w.externalId} (${w.externalId}${w.address ? ' · ' + shortenAddress(w.address) : ''})`;
+      select.appendChild(el('option', { value: w.id }, label));
+    }
+
+    $('worker-count-badge').textContent = `${state.allWorkers.length} người`;
+
+    // Render bảng workers trong tab 4
+    const tbody = $('workers-table-body');
+    if (state.allWorkers.length === 0) {
+      tbody.replaceChildren(emptyRow(5, 'Chưa có người lao động nào được đăng ký.'));
       return;
     }
-    state.apiKey = value;
-    void connect({ fromStorage: false });
-  });
 
-  $('disconnect').addEventListener('click', () => {
-    localStorage.removeItem(STORAGE_KEY);
-    state.apiKey = null;
-    state.workersById = new Map();
-    state.nextCursor = null;
-    $('api-key-input').value = '';
-    showGate('');
-  });
+    const rows = state.allWorkers.map((w) => {
+      const payBtn = el('button', { class: 'btn btn--ghost btn--xs', text: 'Trả tiền' });
+      payBtn.addEventListener('click', () => {
+        select.value = w.id;
+        switchTab('tab-overview');
+        $('amount-input').focus();
+      });
 
-  $('payout-form').addEventListener('submit', (event) => void submitPayout(event));
-  $('run-batcher').addEventListener('click', () => void collectQueue());
-  $('refresh').addEventListener('click', () => {
-    void refresh().then(() => toast('ok', 'Đã làm mới', 'Số liệu vừa đọc lại từ database.'));
-  });
-  $('load-more').addEventListener('click', () => void loadPayouts({ reset: false }));
+      return el(
+        'tr',
+        {},
+        el('td', { class: 'mono', text: w.externalId }),
+        el('td', { text: w.displayName || '—' }),
+        el('td', { class: 'mono', text: w.address ? shortenAddress(w.address) : 'Chưa có ví' }),
+        el('td', { text: formatDate(w.created_at) }),
+        el('td', { class: 'num' }, payBtn),
+      );
+    });
 
-  // Sửa số tiền thì bỏ trạng thái lỗi ngay, đừng để viền đỏ bám theo.
-  $('amount-input').addEventListener('input', () => {
-    const input = $('amount-input');
-    input.removeAttribute('aria-invalid');
-    const help = $('amount-help');
-    help.dataset.tone = '';
-    help.textContent = 'Tối đa 6 chữ số thập phân.';
-  });
-
-  void boot();
+    tbody.replaceChildren(...rows);
+  } catch {
+    $('worker-select').replaceChildren(el('option', { value: '' }, 'Lỗi tải danh bạ người nhận'));
+  }
 }
 
-async function boot() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) {
-    showGate('');
+function paintOverview(ov) {
+  // Bất biến B9: cấm hiện 0 khi chưa tải/lỗi. Nếu có ov hợp lệ thì hiện số thật.
+  $('kpi-queued-count').textContent = (ov.queued?.count ?? 0).toLocaleString('vi-VN');
+  $('kpi-queued-amount').textContent = formatUsdc(ov.queued?.total_micro ?? '0');
+
+  $('kpi-batched-count').textContent = (ov.batched?.count ?? 0).toLocaleString('vi-VN');
+  $('kpi-batched-amount').textContent = formatUsdc(ov.batched?.total_micro ?? '0');
+
+  $('kpi-confirmed-count').textContent = (ov.confirmed?.count ?? 0).toLocaleString('vi-VN');
+  $('kpi-confirmed-amount').textContent = formatUsdc(ov.confirmed?.total_micro ?? '0');
+
+  const total = (ov.queued?.count ?? 0) + (ov.batched?.count ?? 0) + (ov.confirmed?.count ?? 0) + (ov.failed?.count ?? 0);
+  const settled = ov.confirmed?.count ?? 0;
+  const ratePct = total > 0 ? Math.round((settled / total) * 100) : 100;
+
+  $('kpi-rate').textContent = `${ratePct}%`;
+  $('kpi-rate-bar').style.width = `${ratePct}%`;
+  $('kpi-workers').textContent = String(ov.workers ?? 0);
+  $('kpi-batches').textContent = String(ov.batches ?? 0);
+
+  // Bars
+  const max = Math.max(ov.queued?.count ?? 0, ov.batched?.count ?? 0, ov.confirmed?.count ?? 0, 1);
+  $('kpi-queued-bar').style.width = `${Math.round(((ov.queued?.count ?? 0) / max) * 100)}%`;
+  $('kpi-batched-bar').style.width = `${Math.round(((ov.batched?.count ?? 0) / max) * 100)}%`;
+  $('kpi-confirmed-bar').style.width = `${Math.round(((ov.confirmed?.count ?? 0) / max) * 100)}%`;
+
+  // Render recent batches
+  const batchesBody = $('batches-body');
+  const batches = ov.recentBatches ?? [];
+  state.batchesById.clear();
+
+  if (batches.length === 0) {
+    batchesBody.replaceChildren(emptyRow(5, 'Chưa có lô thanh toán nào. Bấm "Gom lô" để bắt đầu.'));
     return;
   }
-  state.apiKey = stored;
-  showShell();
-  await connect({ fromStorage: true });
+
+  const batchRows = batches.map((b) => {
+    state.batchesById.set(b.id, b);
+    const row = el(
+      'tr',
+      { style: 'cursor: pointer;' },
+      el('td', { class: 'mono', text: b.id }),
+      el('td', {}, el('span', { class: `status-pill status-pill--${b.state}`, text: STATE_LABEL[b.state] ?? b.state })),
+      el('td', { class: 'num', text: b.payoutCount }),
+      el('td', { class: 'num', text: formatUsdc(b.total_micro) }),
+      el('td', { text: formatDate(b.created_at) }),
+    );
+
+    row.addEventListener('click', () => openBatchDrawer(b.id));
+    return row;
+  });
+
+  batchesBody.replaceChildren(...batchRows);
 }
 
-wire();
+function paintOverviewError() {
+  // Bất biến B9: Lỗi -> "—" + thông báo. Tuyệt đối không để 0.
+  $('kpi-queued-count').textContent = '—';
+  $('kpi-queued-amount').textContent = '—';
+  $('kpi-batched-count').textContent = '—';
+  $('kpi-batched-amount').textContent = '—';
+  $('kpi-confirmed-count').textContent = '—';
+  $('kpi-confirmed-amount').textContent = '—';
+  $('kpi-rate').textContent = '—';
+  $('kpi-workers').textContent = '—';
+  $('kpi-batches').textContent = '—';
+}
+
+async function loadOverview() {
+  try {
+    const ov = await api('/v1/overview');
+    paintOverview(ov);
+  } catch {
+    paintOverviewError();
+  }
+}
+
+async function loadPayouts(cursor = null) {
+  const tbody = $('payouts-body');
+  if (!cursor) {
+    tbody.replaceChildren(emptyRow(6, 'Đang tải lịch sử chi trả…'));
+  }
+
+  try {
+    let url = `/v1/payouts?limit=${PAGE_SIZE}`;
+    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`;
+
+    const res = await api(url);
+    const payouts = res.payouts ?? [];
+    state.nextCursor = res.nextCursor ?? null;
+
+    $('load-more').hidden = !state.nextCursor;
+
+    if (payouts.length === 0 && !cursor) {
+      tbody.replaceChildren(emptyRow(6, 'Chưa có khoản chi trả nào trong hàng đợi.'));
+      return;
+    }
+
+    const rows = payouts
+      .filter((p) => state.activeFilter === 'all' || p.state === state.activeFilter)
+      .map((p) => {
+        const worker = state.workersById.get(p.workerId);
+        const name = worker?.displayName ?? worker?.externalId ?? shortenAddress(p.workerId);
+
+        return el(
+          'tr',
+          {},
+          el('td', { class: 'mono', text: p.id }),
+          el('td', { text: name }),
+          el('td', { class: 'num', text: formatUsdc(p.amount_micro) }),
+          el('td', {}, el('span', { class: `status-pill status-pill--${p.state}`, text: STATE_LABEL[p.state] ?? p.state })),
+          el('td', { text: p.reference || '—' }),
+          el('td', { text: formatDate(p.created_at) }),
+        );
+      });
+
+    if (cursor) {
+      tbody.append(...rows);
+    } else {
+      tbody.replaceChildren(...rows);
+    }
+  } catch (err) {
+    tbody.replaceChildren(emptyRow(6, `Lỗi tải chi trả: ${err.message}`));
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Payout Form & Batch Runner Actions
+ * ---------------------------------------------------------------------- */
+function initPayoutForm() {
+  const form = $('payout-form');
+  const submitBtn = $('payout-submit');
+
+  // Quick Chips
+  document.querySelectorAll('.chip-add').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const add = chip.dataset.add;
+      const input = $('amount-input');
+      const cur = parseFloat(input.value) || 0;
+      input.value = (cur + parseFloat(add)).toString();
+    });
+  });
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const workerId = $('worker-select').value;
+      const rawAmount = $('amount-input').value.trim();
+      const reference = $('reference-input').value.trim();
+
+      if (!workerId) {
+        toast('Vui lòng chọn người nhận tiền', 'error');
+        return;
+      }
+
+      const parsed = parseAmountToMicro(rawAmount);
+      if (parsed.error) {
+        toast(`Số tiền không hợp lệ: ${parsed.error}`, 'error');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Đang đưa vào hàng đợi…';
+
+      try {
+        const idempotencyKey = `payout_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const res = await api('/v1/payouts', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': idempotencyKey },
+          body: {
+            workerId,
+            amount_micro: parsed.micro,
+            reference: reference || undefined,
+          },
+        });
+
+        toast(`Đã đưa khoản chi trả ${formatUsdc(parsed.micro)} USDC vào hàng đợi!`, 'success');
+        form.reset();
+        await refreshAll();
+      } catch (err) {
+        toast(`Lỗi tạo payout: ${err.message}`, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Đưa vào hàng đợi chi trả';
+      }
+    });
+  }
+
+  // Batch Runner
+  const runBtn = $('run-batcher');
+  if (runBtn) {
+    runBtn.addEventListener('click', async () => {
+      runBtn.disabled = true;
+      runBtn.textContent = '⚡ Đang gom lô…';
+
+      try {
+        const idempotencyKey = `run_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const res = await api('/v1/batches/run', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': idempotencyKey },
+        });
+
+        if (res.batches && res.batches.length > 0) {
+          toast(`Đã gom thành công ${res.payoutCount} payout thành ${res.batches.length} lô Arc!`, 'success');
+        } else {
+          toast(res.message || 'Hàng đợi rỗng, không có payout nào cần gom.', 'info');
+        }
+
+        await refreshAll();
+      } catch (err) {
+        toast(`Lỗi gom lô: ${err.message}`, 'error');
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = '⚡ Gom lô hàng đợi';
+      }
+    });
+  }
+
+  // Refresh Button
+  const refreshBtn = $('refresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      toast('Đang làm mới dữ liệu từ Database…', 'info');
+      await refreshAll();
+      toast('Dữ liệu đã được cập nhật mới nhất!', 'success');
+    });
+  }
+
+  // Filter Buttons
+  document.querySelectorAll('.filter-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('filter-btn--active'));
+      btn.classList.add('filter-btn--active');
+      state.activeFilter = btn.dataset.filter;
+      loadPayouts();
+    });
+  });
+
+  // Load More Button
+  const loadMoreBtn = $('load-more');
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener('click', () => {
+      if (state.nextCursor) loadPayouts(state.nextCursor);
+    });
+  }
+}
+
+async function refreshAll() {
+  await Promise.allSettled([loadOverview(), loadPayouts(), loadWorkers()]);
+}
+
+/* -------------------------------------------------------------------------
+ * Authentication & Gate Flow
+ * ---------------------------------------------------------------------- */
+function initGate() {
+  const form = $('gate-form');
+  const pasteSeedBtn = $('gate-paste-seed');
+  const keyInput = $('api-key-input');
+  const gateError = $('gate-error');
+
+  if (pasteSeedBtn && keyInput) {
+    pasteSeedBtn.addEventListener('click', () => {
+      keyInput.value = 'nhip_sk_seed_00000000000000000000000000000001';
+      form.requestSubmit();
+    });
+  }
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const key = keyInput.value.trim();
+      if (!key) return;
+
+      gateError.textContent = 'Đang kiểm tra khoá API…';
+      state.apiKey = key;
+
+      try {
+        await api('/v1/overview');
+        localStorage.setItem(STORAGE_KEY, key);
+        $('gate').hidden = true;
+        $('shell').hidden = false;
+        $('platform-pill').textContent = 'plat_demo';
+        gateError.textContent = '';
+        toast('Kết nối thành công tới Nhịp Arc L1!', 'success');
+        await refreshAll();
+      } catch (err) {
+        state.apiKey = null;
+        gateError.textContent = `API key không hợp lệ hoặc lỗi kết nối: ${err.message}`;
+      }
+    });
+  }
+
+  const disconnectBtn = $('disconnect');
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener('click', disconnect);
+  }
+}
+
+function disconnect() {
+  localStorage.removeItem(STORAGE_KEY);
+  state.apiKey = null;
+  $('shell').hidden = true;
+  $('gate').hidden = false;
+  $('api-key-input').value = '';
+  paintOverviewError();
+  toast('Đã ngắt kết nối API key.', 'info');
+}
+
+/* -------------------------------------------------------------------------
+ * Health Checker (Đo latency và trạng thái DB)
+ * ---------------------------------------------------------------------- */
+async function checkHealth() {
+  const pill = $('health-pill');
+  const text = $('health-text');
+
+  try {
+    const t0 = performance.now();
+    const res = await api('/health');
+    const t1 = performance.now();
+    const latency = Math.round(t1 - t0);
+
+    if (res.status === 'ok') {
+      pill.className = 'pill pill--live';
+      text.textContent = `Arc DB · ${latency}ms`;
+    } else {
+      pill.className = 'pill pill--ghost';
+      text.textContent = 'DB Chưa sẵn sàng';
+    }
+  } catch {
+    pill.className = 'pill pill--ghost';
+    text.textContent = 'Mất kết nối API';
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Application Bootstrap
+ * ---------------------------------------------------------------------- */
+async function initApp() {
+  initTheme();
+  initTabs();
+  initCommandPalette();
+  initBatchDrawer();
+  initSavingsCalculator();
+  initBulkPlanner();
+  initWorkerPortal();
+  initPayoutForm();
+  initGate();
+
+  const savedKey = localStorage.getItem(STORAGE_KEY);
+  if (savedKey) {
+    state.apiKey = savedKey;
+    $('gate').hidden = true;
+    $('shell').hidden = false;
+    $('platform-pill').textContent = 'plat_demo';
+    await refreshAll();
+  } else {
+    $('gate').hidden = false;
+    $('shell').hidden = true;
+  }
+
+  checkHealth();
+  state.healthTimer = setInterval(checkHealth, 15000);
+}
+
+document.addEventListener('DOMContentLoaded', initApp);

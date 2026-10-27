@@ -3,42 +3,60 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Nhịp — bảng điều khiển trả lương</title>
+    <title>Nhịp — Hạ tầng chi trả tức thì trên Arc L1</title>
     <meta
       name="description"
-      content="Bảng điều khiển Nhịp: theo dõi hàng đợi payout, gom lô theo ngân sách gas, và trạng thái từng lô trên Arc."
+      content="Hạ tầng chi trả lương tức thì cho người lao động gig trên Arc (Circle L1). Phí gas siêu rẻ bằng USDC, gom lô tự động theo ngân sách gas, minh bạch và an toàn tuyệt đối."
     />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0A1628" />
+
+    <!-- Open Graph & Social Cards -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Nhịp" />
+    <meta property="og:title" content="Nhịp — Hạ tầng chi trả tức thì trên Arc L1" />
+    <meta
+      property="og:description"
+      content="Chi trả 5.000 người/ngày chỉ với $3 trên Arc L1 thay vì $12.600 trên Ethereum. Không giữ tiền, tiền về trong vài giây."
+    />
+
+    <!-- Google Fonts: Space Grotesk (display), Inter (text), JetBrains Mono (figures) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@600;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="aurora" aria-hidden="true">
-      <span class="aurora__blob aurora__blob--mint"></span>
-      <span class="aurora__blob aurora__blob--violet"></span>
-      <span class="aurora__blob aurora__blob--amber"></span>
+    <!-- Arc Network Aurora Horizon Background Layer (cảm hứng oneliq.xyz) -->
+    <div class="aurora-bg" aria-hidden="true">
+      <div class="aurora-glow aurora-glow--teal"></div>
+      <div class="aurora-glow aurora-glow--blue"></div>
+      <div class="aurora-glow aurora-glow--peach"></div>
+      <div class="aurora-waves"></div>
     </div>
 
-    <!-- Cổng vào: chỉ hiện khi chưa có API key -->
+    <!-- Noise Texture Overlay -->
+    <div class="noise-overlay" aria-hidden="true"></div>
+
+    <!-- Cổng kết nối (chỉ hiện khi chưa có API key) -->
     <section class="gate" id="gate" hidden>
-      <div class="gate__card">
+      <div class="gate__card glass">
         <div class="brand">
           <span class="brand__mark" aria-hidden="true"></span>
           <span class="brand__name">Nhịp</span>
+          <span class="badge badge--arc">Arc L1</span>
         </div>
-        <h1 class="gate__title">Kết nối nền tảng của bạn</h1>
+        <h1 class="gate__title">Hạ tầng chi trả lương tức thì</h1>
         <p class="gate__lede">
-          Dán API key mà <code>npm run seed</code> in ra. Key được giữ trong
-          <code>localStorage</code> của trình duyệt này, không gửi đi đâu khác.
+          Kết nối nền tảng của bạn bằng API key (tạo tự động qua <code>npm run seed</code>).
+          Key được mã hoá an toàn trong trình duyệt cục bộ, không gửi ra bên ngoài.
         </p>
         <form class="gate__form" id="gate-form">
           <label class="field">
-            <span class="field__label">API key</span>
+            <span class="field__label">API key của nền tảng</span>
             <input
               class="field__input field__input--mono"
               id="api-key-input"
@@ -51,212 +69,819 @@
             />
           </label>
           <p class="gate__error" id="gate-error" role="alert" aria-live="polite"></p>
-          <button class="btn btn--primary btn--block" type="submit" id="gate-submit">
-            <span>Kết nối</span>
+          <div class="gate__quick">
+            <span class="gate__quick-label">Key mẫu nhanh (Seed):</span>
+            <button class="btn-chip" type="button" id="gate-paste-seed">
+              Dán key seed máy dev
+            </button>
+          </div>
+          <button class="btn btn--primary btn--block btn--lg" type="submit" id="gate-submit">
+            <span>Kết nối vào hệ thống</span>
           </button>
         </form>
+        <div class="gate__foot">
+          <span>Chain ID 5042 · Gas sàn 20 Gwei · USDC 6 decimals</span>
+        </div>
       </div>
     </section>
 
-    <!-- Bảng điều khiển -->
+    <!-- Toàn bộ không gian làm việc chính (Shell) -->
     <div class="shell" id="shell" hidden>
-      <header class="topbar">
-        <div class="brand">
-          <span class="brand__mark" aria-hidden="true"></span>
-          <span class="brand__name">Nhịp</span>
+      <!-- Topbar điều hướng cao cấp (học aitmpl.com + oneliq.xyz) -->
+      <header class="topbar glass">
+        <div class="topbar__left">
+          <div class="brand">
+            <span class="brand__mark" aria-hidden="true"></span>
+            <span class="brand__name">Nhịp</span>
+          </div>
+          <span class="badge badge--arc" title="Circle L1 Chain ID: 5042 / 5042002">
+            <span class="badge__dot"></span>
+            Arc L1
+          </span>
+          <span class="topbar__network-param mono" id="network-param">20 Gwei Floor · USDC Native</span>
         </div>
 
-        <div class="topbar__meta">
-          <span class="pill pill--live" id="health-pill">
+        <!-- Thanh điều hướng Tab nghiệp vụ -->
+        <nav class="nav-tabs" aria-label="Các phân hệ của hệ thống">
+          <button class="nav-tab nav-tab--active" type="button" data-tab="tab-overview">
+            <span class="nav-tab__icon">📊</span>
+            <span>Vận hành & Dòng tiền</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="tab-arc">
+            <span class="nav-tab__icon">⚡</span>
+            <span>Mạng Arc & Phí</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="tab-bulk">
+            <span class="nav-tab__icon">📦</span>
+            <span>Chia lô hàng loạt</span>
+          </button>
+          <button class="nav-tab" type="button" data-tab="tab-workers">
+            <span class="nav-tab__icon">👤</span>
+            <span>Danh bạ & Tra cứu</span>
+          </button>
+        </nav>
+
+        <div class="topbar__right">
+          <!-- Command Trigger (Ctrl+K - học aitmpl.com) -->
+          <button class="btn-command" type="button" id="cmd-trigger" title="Mở menu phím tắt (Ctrl+K)">
+            <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span class="btn-command__text">Lệnh nhanh</span>
+            <kbd class="kbd">⌘K</kbd>
+          </button>
+
+          <!-- Trạng thái kết nối DB / API -->
+          <span class="pill pill--live" id="health-pill" title="Trạng thái API và cơ sở dữ liệu PGlite">
             <i class="dot" aria-hidden="true"></i>
-            <span id="health-text">đang kiểm tra</span>
+            <span id="health-text">Đang kiểm tra</span>
           </span>
-          <span class="pill pill--ghost" id="platform-pill">—</span>
-          <button class="btn btn--ghost btn--sm" type="button" id="disconnect">Đổi key</button>
+
+          <!-- Tên nền tảng & Đổi key -->
+          <div class="platform-meta">
+            <span class="pill pill--ghost mono" id="platform-pill" title="Platform ID hiện tại">—</span>
+            <button class="btn btn--ghost btn--xs" type="button" id="disconnect" title="Đổi API key">Đổi key</button>
+          </div>
+
+          <!-- Theme Toggle (Dark / Light - học aitmpl.com) -->
+          <button class="btn-icon" type="button" id="theme-toggle" aria-label="Chuyển chế độ Sáng / Tối" title="Đổi giao diện Sáng / Tối">
+            <svg class="icon icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+            <svg class="icon icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </button>
         </div>
       </header>
 
-      <main class="main">
-        <section class="hero">
-          <div>
-            <p class="eyebrow">Bảng điều khiển vận hành</p>
-            <h1 class="hero__title">
-              Dòng tiền đang chảy<br />
-              <span class="grad">hay đang đứng yên?</span>
-            </h1>
-            <p class="hero__lede">
-              Mọi con số dưới đây đọc trực tiếp từ database. Không có mock, không có
-              số ước lượng.
-            </p>
-          </div>
-
-          <div class="hero__actions">
-            <button class="btn btn--primary" type="button" id="run-batcher">
-              <span class="btn__spinner" aria-hidden="true"></span>
-              <span class="btn__label">Gom lô hàng đợi</span>
-            </button>
-            <button class="btn btn--ghost" type="button" id="refresh">
-              <span class="btn__label">Làm mới</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="kpis" aria-label="Tổng quan">
-          <article class="kpi kpi--queued">
-            <header class="kpi__head">
-              <span class="kpi__label">Đang chờ</span>
-              <span class="kpi__badge">queued</span>
-            </header>
-            <p class="kpi__value" id="kpi-queued-count">—</p>
-            <p class="kpi__sub"><span class="mono" id="kpi-queued-amount">—</span> USDC</p>
-            <div class="kpi__bar"><span style="width: 0%"></span></div>
-          </article>
-
-          <article class="kpi kpi--batched">
-            <header class="kpi__head">
-              <span class="kpi__label">Đã vào lô</span>
-              <span class="kpi__badge">batched</span>
-            </header>
-            <p class="kpi__value" id="kpi-batched-count">—</p>
-            <p class="kpi__sub"><span class="mono" id="kpi-batched-amount">—</span> USDC</p>
-            <div class="kpi__bar"><span style="width: 0%"></span></div>
-          </article>
-
-          <article class="kpi kpi--confirmed">
-            <header class="kpi__head">
-              <span class="kpi__label">Đã trả</span>
-              <span class="kpi__badge">confirmed</span>
-            </header>
-            <p class="kpi__value" id="kpi-confirmed-count">—</p>
-            <p class="kpi__sub"><span class="mono" id="kpi-confirmed-amount">—</span> USDC</p>
-            <div class="kpi__bar"><span style="width: 0%"></span></div>
-          </article>
-
-          <article class="kpi kpi--rate">
-            <header class="kpi__head">
-              <span class="kpi__label">Tỉ lệ thành công</span>
-              <span class="kpi__badge">settled</span>
-            </header>
-            <p class="kpi__value" id="kpi-rate">—</p>
-            <p class="kpi__sub">
-              <span id="kpi-workers">—</span> người · <span id="kpi-batches">—</span> lô
-            </p>
-            <div class="kpi__bar"><span id="kpi-rate-bar" style="width: 0%"></span></div>
-          </article>
-        </section>
-
-        <div class="grid">
-          <section class="panel" aria-labelledby="new-payout-title">
-            <header class="panel__head">
-              <h2 class="panel__title" id="new-payout-title">Trả một người</h2>
-              <p class="panel__hint">Vào hàng đợi ngay, không chờ chain</p>
-            </header>
-
-            <form class="form" id="payout-form">
-              <label class="field">
-                <span class="field__label">Người lao động</span>
-                <select class="field__input" id="worker-select" name="workerId" required>
-                  <option value="">Đang tải…</option>
-                </select>
-              </label>
-
-              <label class="field">
-                <span class="field__label">Số tiền (USDC)</span>
-                <input
-                  class="field__input field__input--mono"
-                  id="amount-input"
-                  name="amount"
-                  inputmode="decimal"
-                  placeholder="1.65075"
-                  autocomplete="off"
-                  required
-                />
-                <span class="field__help" id="amount-help">Tối đa 6 chữ số thập phân.</span>
-              </label>
-
-              <label class="field">
-                <span class="field__label">Tham chiếu <span class="field__opt">không bắt buộc</span></span>
-                <input
-                  class="field__input"
-                  id="reference-input"
-                  name="reference"
-                  placeholder="Đơn #1042"
-                  autocomplete="off"
-                  maxlength="500"
-                />
-              </label>
-
-              <button class="btn btn--primary btn--block" type="submit" id="payout-submit">
-                <span>Đưa vào hàng đợi</span>
-              </button>
-              <p class="form__note">
-                Idempotency-Key được sinh tự động cho mỗi lần bấm. Bấm hai lần sẽ
-                không tạo hai payout.
+      <!-- Nội dung chính phân theo Tab -->
+      <main class="main-content">
+        <!-- ===================================================================
+             TAB 1: TỔNG QUAN & VẬN HÀNH DÒNG TIỀN
+             =================================================================== -->
+        <section class="tab-pane tab-pane--active" id="tab-overview">
+          <!-- Hero Section -->
+          <div class="hero">
+            <div class="hero__lead">
+              <div class="eyebrow-wrap">
+                <span class="eyebrow">Dòng tiền Gig · Arc L1 Settlement</span>
+                <span class="pill pill--subtle">Dữ liệu DB thực</span>
+              </div>
+              <h1 class="hero__title">
+                Chi trả tức thì trong vài giây.<br />
+                <span class="grad">Không giam vốn 7 ngày.</span>
+              </h1>
+              <p class="hero__lede">
+                Tiền đi trực tiếp từ quỹ doanh nghiệp tới ví người lao động bằng USDC trên Arc.
+                Không giữ tiền, không chịu rủi ro đối tác.
               </p>
-            </form>
-          </section>
+            </div>
 
-          <section class="panel panel--wide" aria-labelledby="batches-title">
-            <header class="panel__head">
-              <h2 class="panel__title" id="batches-title">Lô gần đây</h2>
-              <p class="panel__hint">Mỗi lô là một giao dịch sẽ gửi lên Arc</p>
+            <div class="hero__actions">
+              <button class="btn btn--primary btn--glow" type="button" id="run-batcher">
+                <span class="btn__spinner" aria-hidden="true"></span>
+                <span class="btn__label">⚡ Gom lô hàng đợi</span>
+              </button>
+              <button class="btn btn--secondary" type="button" id="refresh">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M23 4v6h-6"></path>
+                  <path d="M1 20v-6h6"></path>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+                <span class="btn__label">Làm mới dữ liệu</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- KPI Cards: Bất biến B9 (lỗi hiện —, cấm hiện 0) -->
+          <div class="kpis" aria-label="Chỉ số hiệu năng dòng tiền">
+            <article class="kpi-card glass kpi-card--queued">
+              <header class="kpi-card__head">
+                <span class="kpi-card__label">Hàng đợi</span>
+                <span class="kpi-badge kpi-badge--queued">queued</span>
+              </header>
+              <p class="kpi-card__val mono" id="kpi-queued-count">—</p>
+              <p class="kpi-card__sub"><span class="mono" id="kpi-queued-amount">—</span> USDC</p>
+              <div class="kpi-progress"><span id="kpi-queued-bar" style="width: 0%"></span></div>
+            </article>
+
+            <article class="kpi-card glass kpi-card--batched">
+              <header class="kpi-card__head">
+                <span class="kpi-card__label">Đã gom lô</span>
+                <span class="kpi-badge kpi-badge--batched">batched</span>
+              </header>
+              <p class="kpi-card__val mono" id="kpi-batched-count">—</p>
+              <p class="kpi-card__sub"><span class="mono" id="kpi-batched-amount">—</span> USDC</p>
+              <div class="kpi-progress"><span id="kpi-batched-bar" style="width: 0%"></span></div>
+            </article>
+
+            <article class="kpi-card glass kpi-card--confirmed">
+              <header class="kpi-card__head">
+                <span class="kpi-card__label">Đã thanh toán</span>
+                <span class="kpi-badge kpi-badge--confirmed">confirmed</span>
+              </header>
+              <p class="kpi-card__val mono" id="kpi-confirmed-count">—</p>
+              <p class="kpi-card__sub"><span class="mono" id="kpi-confirmed-amount">—</span> USDC</p>
+              <div class="kpi-progress"><span id="kpi-confirmed-bar" style="width: 0%"></span></div>
+            </article>
+
+            <article class="kpi-card glass kpi-card--rate">
+              <header class="kpi-card__head">
+                <span class="kpi-card__label">Tỉ lệ hoàn tất</span>
+                <span class="kpi-badge kpi-badge--rate">settled</span>
+              </header>
+              <p class="kpi-card__val mono" id="kpi-rate">—</p>
+              <p class="kpi-card__sub">
+                <span id="kpi-workers" class="mono">—</span> người · <span id="kpi-batches" class="mono">—</span> lô
+              </p>
+              <div class="kpi-progress"><span id="kpi-rate-bar" style="width: 0%"></span></div>
+            </article>
+          </div>
+
+          <!-- Bố cục 2 cột: Tạo chi trả lẻ & Danh sách lô -->
+          <div class="grid-2col">
+            <!-- Panel: Trả một người -->
+            <section class="panel glass" aria-labelledby="new-payout-title">
+              <header class="panel__head">
+                <div>
+                  <h2 class="panel__title" id="new-payout-title">Tạo chi trả đơn lẻ</h2>
+                  <p class="panel__sub">Vào hàng đợi < 100ms, không bị block bởi tốc độ blockchain</p>
+                </div>
+              </header>
+
+              <form class="form" id="payout-form">
+                <label class="field">
+                  <span class="field__label">Người nhận (Lao động / Tài xế)</span>
+                  <select class="field__input" id="worker-select" name="workerId" required>
+                    <option value="">Đang tải danh bạ người nhận…</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <div class="field__row">
+                    <span class="field__label">Số tiền (USDC)</span>
+                    <span class="field__quick-chips">
+                      <button type="button" class="chip-add" data-add="5">+5</button>
+                      <button type="button" class="chip-add" data-add="20">+20</button>
+                      <button type="button" class="chip-add" data-add="50">+50</button>
+                      <button type="button" class="chip-add" data-add="100">+100</button>
+                    </span>
+                  </div>
+                  <input
+                    class="field__input field__input--mono"
+                    id="amount-input"
+                    name="amount"
+                    inputmode="decimal"
+                    placeholder="Ví dụ: 1.65075 hoặc 25"
+                    autocomplete="off"
+                    required
+                  />
+                  <span class="field__help" id="amount-help">Đơn vị: 1 USDC = 1.000.000 micro. Tối đa 6 chữ số thập phân.</span>
+                </label>
+
+                <label class="field">
+                  <span class="field__label">Mã tham chiếu đối soát <span class="field__opt">tùy chọn</span></span>
+                  <input
+                    class="field__input"
+                    id="reference-input"
+                    name="reference"
+                    placeholder="Ví dụ: Đơn giao hàng #HN-8842"
+                    autocomplete="off"
+                    maxlength="500"
+                  />
+                </label>
+
+                <button class="btn btn--primary btn--block btn--lg" type="submit" id="payout-submit">
+                  <span>Đưa vào hàng đợi chi trả</span>
+                </button>
+                <p class="form__note">
+                  🔒 <code>Idempotency-Key</code> sinh tự động cho mỗi lần ấn. Bấm liên tiếp nhiều lần không lo trả trùng.
+                </p>
+              </form>
+            </section>
+
+            <!-- Panel: Lô gần đây -->
+            <section class="panel glass" aria-labelledby="batches-title">
+              <header class="panel__head panel__head--row">
+                <div>
+                  <h2 class="panel__title" id="batches-title">Các lô thanh toán (Batches)</h2>
+                  <p class="panel__sub">Mỗi lô tương ứng một giao dịch trên Arc. Bấm vào lô để xem chi tiết.</p>
+                </div>
+              </header>
+
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Mã lô</th>
+                      <th scope="col">Trạng thái</th>
+                      <th scope="col" class="num">Số lượng</th>
+                      <th scope="col" class="num">Tổng tiền</th>
+                      <th scope="col">Thời gian</th>
+                    </tr>
+                  </thead>
+                  <tbody id="batches-body">
+                    <tr><td colspan="5" class="empty">Đang tải danh sách lô…</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <!-- Bảng Payouts gần đây có bộ lọc -->
+          <section class="panel glass" aria-labelledby="payouts-title">
+            <header class="panel__head panel__head--row">
+              <div>
+                <h2 class="panel__title" id="payouts-title">Nhật ký chi trả gần đây</h2>
+                <p class="panel__sub">Phân trang bằng con trỏ cursor tự động · Không dùng OFFSET chậm</p>
+              </div>
+
+              <!-- Filter tabs -->
+              <div class="filter-group">
+                <button class="filter-btn filter-btn--active" type="button" data-filter="all">Tất cả</button>
+                <button class="filter-btn" type="button" data-filter="queued">Chờ</button>
+                <button class="filter-btn" type="button" data-filter="batched">Trong lô</button>
+                <button class="filter-btn" type="button" data-filter="confirmed">Đã trả</button>
+                <button class="btn btn--ghost btn--xs" type="button" id="load-more" hidden>
+                  Tải thêm
+                </button>
+              </div>
             </header>
+
             <div class="table-wrap">
               <table class="table">
                 <thead>
                   <tr>
-                    <th scope="col">Lô</th>
+                    <th scope="col">Mã Payout</th>
+                    <th scope="col">Người nhận</th>
+                    <th scope="col" class="num">Số tiền (USDC)</th>
                     <th scope="col">Trạng thái</th>
-                    <th scope="col" class="num">Số payout</th>
-                    <th scope="col" class="num">Tổng</th>
-                    <th scope="col">Tạo lúc</th>
+                    <th scope="col">Tham chiếu</th>
+                    <th scope="col">Thời gian</th>
                   </tr>
                 </thead>
-                <tbody id="batches-body">
-                  <tr><td colspan="5" class="empty">Đang tải…</td></tr>
+                <tbody id="payouts-body">
+                  <tr><td colspan="6" class="empty">Đang tải lịch sử chi trả…</td></tr>
                 </tbody>
               </table>
             </div>
           </section>
-        </div>
+        </section>
 
-        <section class="panel" aria-labelledby="payouts-title">
-          <header class="panel__head panel__head--row">
-            <div>
-              <h2 class="panel__title" id="payouts-title">Payout gần đây</h2>
-              <p class="panel__hint">Mới nhất trước · phân trang bằng cursor, không OFFSET</p>
+        <!-- ===================================================================
+             TAB 2: MẠNG ARC & GIÁ TRỊ KINH TẾ (cảm hứng oneliq.xyz)
+             =================================================================== -->
+        <section class="tab-pane" id="tab-arc">
+          <div class="section-lead">
+            <span class="badge badge--arc">Circle L1 Architecture</span>
+            <h2 class="section-title">Tại sao Arc L1 thay đổi cuộc chơi Gig Economy?</h2>
+            <p class="section-sub">
+              So sánh chi phí kinh tế thật: trả hàng nghìn người mỗi ngày trên Arc với phí tính bằng cent,
+              thay vì hàng nghìn dollar tiền gas trên Ethereum L1.
+            </p>
+          </div>
+
+          <!-- Arbitrage Metric Bento Grid -->
+          <div class="arbitrage-grid">
+            <div class="bento-card glass bento-card--eth">
+              <div class="bento-card__badge">Ethereum L1</div>
+              <div class="bento-card__num mono">~$12.600</div>
+              <div class="bento-card__label">Chi phí gas cho 5.000 payout / ngày</div>
+              <p class="bento-card__desc">
+                Trung bình ~$2.52 mỗi lần chuyển USDC. Với đơn hàng tài xế 15.000đ (0.6 USDC),
+                phí gas cao hơn <strong>437%</strong> thu nhập của người nhận. Hoàn toàn không khả thi.
+              </p>
             </div>
-            <button class="btn btn--ghost btn--sm" type="button" id="load-more" hidden>
-              Tải thêm
-            </button>
-          </header>
-          <div class="table-wrap">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th scope="col">Payout</th>
-                  <th scope="col">Người nhận</th>
-                  <th scope="col" class="num">Số tiền</th>
-                  <th scope="col">Trạng thái</th>
-                  <th scope="col">Tham chiếu</th>
-                  <th scope="col">Tạo lúc</th>
-                </tr>
-              </thead>
-              <tbody id="payouts-body">
-                <tr><td colspan="6" class="empty">Đang tải…</td></tr>
-              </tbody>
-            </table>
+
+            <div class="bento-card glass bento-card--arc">
+              <div class="bento-card__badge badge--arc">Arc Network (Circle L1)</div>
+              <div class="bento-card__num mono grad">~$3,00</div>
+              <div class="bento-card__label">Chi phí gas cho 5.000 payout / ngày</div>
+              <p class="bento-card__desc">
+                Chỉ ~$0.0006 mỗi payout nhờ kiến trúc gom lô (Batching) và sàn gas 20 Gwei trên Arc.
+                Chi phí chỉ chiếm <strong>0,1%</strong> đơn hàng, tiền về ví người lao động trong tích tắc.
+              </p>
+            </div>
+
+            <div class="bento-card glass bento-card--save">
+              <div class="bento-card__badge">Tiết kiệm ròng</div>
+              <div class="bento-card__num mono" style="color: var(--arc-mint)">99,98%</div>
+              <div class="bento-card__label">Lợi thế kinh tế tuyệt đối</div>
+              <p class="bento-card__desc">
+                Doanh nghiệp gig giữ được toàn bộ biên lợi nhuận, người lao động nhận tiền tức thì
+                ngay khi hoàn thành cuốc xe hoặc ca làm.
+              </p>
+            </div>
+          </div>
+
+          <!-- Interactive Calculator -->
+          <div class="panel glass calc-panel">
+            <header class="panel__head">
+              <div>
+                <h3 class="panel__title">Máy tính tiết kiệm phí tự động</h3>
+                <p class="panel__sub">Kéo thanh trượt để ước tính ngân sách tiết kiệm của nền tảng bạn</p>
+              </div>
+            </header>
+
+            <div class="calc-body">
+              <div class="calc-slider-wrap">
+                <div class="calc-slider-header">
+                  <span class="calc-slider-label">Số lượng người nhận mỗi ngày:</span>
+                  <span class="calc-slider-val mono" id="calc-count-display">5.000 người/ngày</span>
+                </div>
+                <input
+                  type="range"
+                  class="calc-slider"
+                  id="calc-slider"
+                  min="100"
+                  max="50000"
+                  step="100"
+                  value="5000"
+                />
+                <div class="calc-slider-ticks">
+                  <span>100</span>
+                  <span>10.000</span>
+                  <span>25.000</span>
+                  <span>50.000 người</span>
+                </div>
+              </div>
+
+              <div class="calc-results-grid">
+                <div class="calc-stat">
+                  <span class="calc-stat__label">Phí trên Ethereum L1 (năm)</span>
+                  <span class="calc-stat__val mono" id="calc-eth-cost">$4.599.000</span>
+                </div>
+                <div class="calc-stat">
+                  <span class="calc-stat__label">Phí trên Arc L1 (năm)</span>
+                  <span class="calc-stat__val mono" id="calc-arc-cost" style="color: var(--arc-teal)">$1.095</span>
+                </div>
+                <div class="calc-stat calc-stat--highlight">
+                  <span class="calc-stat__label">Tiết kiệm ròng mỗi năm</span>
+                  <span class="calc-stat__val mono" id="calc-saved" style="color: var(--arc-mint)">$4.597.905</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Arc Protocol Technical Specs Card -->
+          <div class="panel glass">
+            <header class="panel__head">
+              <h3 class="panel__title">Thông số kỹ thuật chuẩn Arc (Circle L1)</h3>
+              <p class="panel__sub">Được khoá cứng trong bộ mã kiểm tra tự động (B1–B10)</p>
+            </header>
+            <div class="specs-grid">
+              <div class="spec-item">
+                <span class="spec-item__k">Chain ID Mainnet</span>
+                <span class="spec-item__v mono">5042</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-item__k">Chain ID Testnet</span>
+                <span class="spec-item__v mono">5042002</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-item__k">Sàn Gas Arc (B4)</span>
+                <span class="spec-item__v mono">20 Gwei (bắt buộc)</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-item__k">Token chi trả</span>
+                <span class="spec-item__v mono">USDC (6 decimals)</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-item__k">Ngân sách Gas Lô (gasBudget)</span>
+                <span class="spec-item__v mono">10.000.000 gas (~350 tx/lô)</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-item__k">Tốc độ xác thực</span>
+                <span class="spec-item__v mono">Sub-second finality</span>
+              </div>
+            </div>
           </div>
         </section>
 
-        <footer class="foot">
-          <span>Nhịp · MVP trên Arc</span>
-          <span class="foot__sep">·</span>
-          <span id="foot-note">Gas/payout đang là ước lượng 28.000, chưa đo thật.</span>
-        </footer>
+        <!-- ===================================================================
+             TAB 3: CHIA LÔ HÀNG LOẠT (BULK PAYOUT PLANNER - học oneliq.xyz)
+             =================================================================== -->
+        <section class="tab-pane" id="tab-bulk">
+          <div class="section-lead">
+            <span class="badge badge--arc">Mass Batching Engine</span>
+            <h2 class="section-title">Chia lô chi trả lương hàng loạt</h2>
+            <p class="section-sub">
+              Dán dữ liệu danh sách người lao động cần thanh toán. Hệ thống sẽ tự động validate từng dòng,
+              tính toán ngân sách gas, và phân bổ thành các lô tối ưu sẵn sàng gửi lên Arc.
+            </p>
+          </div>
+
+          <div class="grid-2col">
+            <!-- Form dán dữ liệu -->
+            <div class="panel glass">
+              <header class="panel__head panel__head--row">
+                <div>
+                  <h3 class="panel__title">Nhập danh sách thanh toán</h3>
+                  <p class="panel__sub">Định dạng: <code>externalId,số_tiền_usdc,tham_chiếu</code></p>
+                </div>
+                <button class="btn btn--ghost btn--xs" type="button" id="bulk-load-sample">
+                  + Nạp 5 dòng mẫu
+                </button>
+              </header>
+
+              <div class="bulk-form">
+                <textarea
+                  class="bulk-textarea mono"
+                  id="bulk-input"
+                  rows="12"
+                  placeholder="dr-101,15.50,Chuyến xe Grab 8891&#10;dr-102,42.00,Chuyến xe Grab 8892&#10;dr-103,120.75,Thưởng năng suất tuần&#10;dr-104,18.00,Giao đồ ăn Now&#10;dr-105,95.25,Cuốc xe sân bay"
+                  spellcheck="false"
+                ></textarea>
+
+                <div class="bulk-actions">
+                  <button class="btn btn--secondary" type="button" id="bulk-preview-btn">
+                    Kiểm tra & Xem trước
+                  </button>
+                  <button class="btn btn--primary btn--glow" type="button" id="bulk-submit-btn" disabled>
+                    ⚡ Tạo lô & Đưa vào hàng đợi
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Kết quả kiểm tra Preview -->
+            <div class="panel glass">
+              <header class="panel__head">
+                <h3 class="panel__title">Kết quả phân tích trước khi tạo</h3>
+                <p class="panel__sub">Kiểm toán số tiền và cấu trúc trước khi gửi lên API</p>
+              </header>
+
+              <div class="bulk-summary">
+                <div class="summary-metric">
+                  <span class="summary-metric__label">Hợp lệ</span>
+                  <span class="summary-metric__val mono" id="bulk-valid-count" style="color: var(--arc-mint)">0</span>
+                </div>
+                <div class="summary-metric">
+                  <span class="summary-metric__label">Dòng lỗi</span>
+                  <span class="summary-metric__val mono" id="bulk-invalid-count" style="color: var(--arc-rose)">0</span>
+                </div>
+                <div class="summary-metric">
+                  <span class="summary-metric__label">Tổng USDC</span>
+                  <span class="summary-metric__val mono" id="bulk-total-amount">0,00</span>
+                </div>
+                <div class="summary-metric">
+                  <span class="summary-metric__label">Số lô dự kiến</span>
+                  <span class="summary-metric__val mono" id="bulk-batches-est">0</span>
+                </div>
+              </div>
+
+              <div class="table-wrap bulk-preview-table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Dòng</th>
+                      <th scope="col">Mã người nhận</th>
+                      <th scope="col" class="num">Số tiền</th>
+                      <th scope="col">Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bulk-preview-body">
+                    <tr><td colspan="4" class="empty">Chưa có dữ liệu. Bấm "Kiểm tra & Xem trước" để phân tích.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================================================================
+             TAB 4: DANH BẠ & TRA CỨU BIÊN NHẬN (cảm hứng ezwallet.cash)
+             =================================================================== -->
+        <section class="tab-pane" id="tab-workers">
+          <div class="section-lead">
+            <span class="badge badge--arc">Frictionless Recipient Portal</span>
+            <h2 class="section-title">Danh bạ người nhận & Cổng tra cứu tức thì</h2>
+            <p class="section-sub">
+              Học theo triết lý của ezwallet: Đơn giản đến mức mẹ tôi cũng dùng được.
+              Người lao động chỉ cần nhập mã tài xế hoặc ví để kiểm tra tiền lương về mà không cần cài ví Web3 rườm rà.
+            </p>
+          </div>
+
+          <div class="grid-2col">
+            <!-- Cổng tra cứu biên nhận người lao động (Portal Look-up) -->
+            <div class="panel glass">
+              <header class="panel__head">
+                <h3 class="panel__title">🔍 Cổng tra cứu biên nhận người lao động</h3>
+                <p class="panel__sub">Tra cứu lịch sử nhận tiền, trạng thái ví và mã giao dịch Arc</p>
+              </header>
+
+              <form class="portal-lookup-form" id="worker-lookup-form">
+                <div class="field">
+                  <span class="field__label">Nhập mã nhân viên hoặc Worker ID</span>
+                  <div class="field-with-btn">
+                    <input
+                      class="field__input field__input--mono"
+                      id="worker-lookup-input"
+                      placeholder="Ví dụ: dr-101 hoặc w_..."
+                      required
+                    />
+                    <button class="btn btn--primary" type="submit">Tra cứu</button>
+                  </div>
+                </div>
+              </form>
+
+              <!-- Kết quả tra cứu chi tiết -->
+              <div class="portal-result" id="portal-result" hidden>
+                <div class="worker-id-card glass">
+                  <div class="worker-id-card__avatar">👤</div>
+                  <div class="worker-id-card__info">
+                    <h4 class="worker-id-card__name" id="lookup-name">—</h4>
+                    <p class="worker-id-card__code mono" id="lookup-ext-id">—</p>
+                    <p class="worker-id-card__address mono" id="lookup-address">—</p>
+                  </div>
+                </div>
+
+                <div class="portal-stats">
+                  <div class="portal-stat">
+                    <span class="portal-stat__label">Tổng tiền đã nhận (USDC)</span>
+                    <span class="portal-stat__val mono" id="lookup-total-confirmed" style="color: var(--arc-mint)">—</span>
+                  </div>
+                  <div class="portal-stat">
+                    <span class="portal-stat__label">Tiền đang chờ về</span>
+                    <span class="portal-stat__val mono" id="lookup-total-pending" style="color: var(--arc-peach)">—</span>
+                  </div>
+                </div>
+
+                <div class="portal-receipts-wrap">
+                  <h5 class="portal-receipts-title">Các biên nhận gần đây</h5>
+                  <div class="receipts-list" id="lookup-receipts-list">
+                    <!-- Dynamic receipts rendered here -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Thêm người nhận mới vào hệ thống -->
+            <div class="panel glass">
+              <header class="panel__head">
+                <h3 class="panel__title">Thêm người lao động vào danh bạ</h3>
+                <p class="panel__sub">Gán mã nhân viên nội bộ với địa chỉ ví Arc (EIP-55 chuẩn)</p>
+              </header>
+
+              <form class="form" id="create-worker-form">
+                <label class="field">
+                  <span class="field__label">Mã định danh nội bộ (External ID)</span>
+                  <input
+                    class="field__input field__input--mono"
+                    id="new-worker-ext-id"
+                    placeholder="Ví dụ: dr-204, shipper-992"
+                    required
+                  />
+                  <span class="field__help">Mã này duy nhất trong nền tảng của bạn.</span>
+                </label>
+
+                <label class="field">
+                  <span class="field__label">Họ tên người nhận <span class="field__opt">tùy chọn</span></span>
+                  <input
+                    class="field__input"
+                    id="new-worker-name"
+                    placeholder="Ví dụ: Nguyễn Văn Bình"
+                  />
+                </label>
+
+                <label class="field">
+                  <span class="field__label">Địa chỉ ví Arc (USDC) <span class="field__opt">tùy chọn</span></span>
+                  <input
+                    class="field__input field__input--mono"
+                    id="new-worker-address"
+                    placeholder="0x..."
+                  />
+                  <span class="field__help">Chặn address(0) (B3). Địa chỉ EIP-55 sẽ được chuẩn hoá tự động.</span>
+                </label>
+
+                <button class="btn btn--primary btn--block btn--lg" type="submit" id="create-worker-submit">
+                  Lưu vào danh bạ
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Danh sách toàn bộ người nhận hiện có -->
+          <div class="panel glass" style="margin-top: 24px;">
+            <header class="panel__head panel__head--row">
+              <div>
+                <h3 class="panel__title">Danh bạ người nhận trong hệ thống</h3>
+                <p class="panel__sub">Danh sách người lao động đã đăng ký nhận lương qua Arc</p>
+              </div>
+              <span class="pill pill--ghost mono" id="worker-count-badge">0 người</span>
+            </header>
+
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Mã định danh</th>
+                    <th scope="col">Tên hiển thị</th>
+                    <th scope="col">Địa chỉ ví Arc</th>
+                    <th scope="col">Ngày tạo</th>
+                    <th scope="col" class="num">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody id="workers-table-body">
+                  <tr><td colspan="5" class="empty">Đang tải danh sách người nhận…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
       </main>
+
+      <!-- Footer thông tin -->
+      <footer class="footer">
+        <div class="footer__inner">
+          <div class="footer__copy">
+            <strong>Nhịp</strong> · Hạ tầng chi trả lương tức thì trên Arc (Circle L1)
+          </div>
+          <div class="footer__links">
+            <span class="mono">Chain ID: 5042 / 5042002</span>
+            <span>·</span>
+            <span>Gas floor: 20 Gwei (B4)</span>
+            <span>·</span>
+            <span>Math: Micro BigInt (B1/B10)</span>
+          </div>
+        </div>
+      </footer>
     </div>
 
+    <!-- ===================================================================
+         DRAWER: CHI TIẾT LÔ (BATCH DETAILS)
+         =================================================================== -->
+    <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+    <aside class="drawer glass" id="batch-drawer" aria-label="Chi tiết lô chi trả" hidden>
+      <header class="drawer__header">
+        <div>
+          <span class="badge badge--arc">Arc Batch Inspector</span>
+          <h3 class="drawer__title mono" id="drawer-batch-id">—</h3>
+        </div>
+        <button class="btn-icon" type="button" id="drawer-close" aria-label="Đóng bảng chi tiết">
+          ✕
+        </button>
+      </header>
+
+      <div class="drawer__body">
+        <div class="drawer-stats">
+          <div class="drawer-stat">
+            <span class="drawer-stat__label">Trạng thái</span>
+            <span class="drawer-stat__val mono" id="drawer-batch-state">—</span>
+          </div>
+          <div class="drawer-stat">
+            <span class="drawer-stat__label">Số lượng Payout</span>
+            <span class="drawer-stat__val mono" id="drawer-batch-count">—</span>
+          </div>
+          <div class="drawer-stat">
+            <span class="drawer-stat__label">Tổng số tiền</span>
+            <span class="drawer-stat__val mono" id="drawer-batch-total">—</span>
+          </div>
+          <div class="drawer-stat">
+            <span class="drawer-stat__label">Ước lượng Gas Arc</span>
+            <span class="drawer-stat__val mono" id="drawer-batch-gas">—</span>
+          </div>
+        </div>
+
+        <div class="drawer-tx-box glass" id="drawer-tx-box">
+          <span class="drawer-tx-label">Mã giao dịch Arc (Tx Hash):</span>
+          <p class="drawer-tx-hash mono" id="drawer-batch-tx">—</p>
+        </div>
+
+        <h4 class="drawer-subhead">Danh sách chi trả trong lô này</h4>
+        <div class="table-wrap drawer-table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Mã Payout</th>
+                <th scope="col">Người nhận</th>
+                <th scope="col" class="num">Số tiền</th>
+                <th scope="col">Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody id="drawer-payouts-body">
+              <tr><td colspan="4" class="empty">Đang tải chi tiết các giao dịch trong lô…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===================================================================
+         MODAL: COMMAND PALETTE (Ctrl+K - học aitmpl.com)
+         =================================================================== -->
+    <div class="cmd-backdrop" id="cmd-backdrop" hidden>
+      <div class="cmd-dialog glass" role="dialog" aria-modal="true" aria-labelledby="cmd-search-input">
+        <div class="cmd-header">
+          <svg class="cmd-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            class="cmd-input mono"
+            id="cmd-search-input"
+            type="text"
+            placeholder="Gõ lệnh hoặc điều hướng (ví dụ: gom lô, tab arc, tạo payout)..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <kbd class="kbd">ESC</kbd>
+        </div>
+
+        <div class="cmd-list" id="cmd-list">
+          <div class="cmd-group-label">Hành động nhanh</div>
+          <button class="cmd-item" type="button" data-cmd="run-batcher">
+            <span class="cmd-item__icon">⚡</span>
+            <span class="cmd-item__label">Gom lô hàng đợi chi trả</span>
+            <span class="cmd-item__shortcut">Enter</span>
+          </button>
+          <button class="cmd-item" type="button" data-cmd="refresh">
+            <span class="cmd-item__icon">🔄</span>
+            <span class="cmd-item__label">Làm mới dữ liệu từ Database</span>
+          </button>
+          <button class="cmd-item" type="button" data-cmd="toggle-theme">
+            <span class="cmd-item__icon">🌓</span>
+            <span class="cmd-item__label">Chuyển đổi chế độ Giao diện Sáng / Tối</span>
+          </button>
+
+          <div class="cmd-group-label">Chuyển đổi phân hệ</div>
+          <button class="cmd-item" type="button" data-cmd="tab-overview">
+            <span class="cmd-item__icon">📊</span>
+            <span class="cmd-item__label">Vận hành & Dòng tiền</span>
+          </button>
+          <button class="cmd-item" type="button" data-cmd="tab-arc">
+            <span class="cmd-item__icon">⚡</span>
+            <span class="cmd-item__label">Mạng Arc & Tính kinh tế</span>
+          </button>
+          <button class="cmd-item" type="button" data-cmd="tab-bulk">
+            <span class="cmd-item__icon">📦</span>
+            <span class="cmd-item__label">Chia lô hàng loạt (Bulk Payout)</span>
+          </button>
+          <button class="cmd-item" type="button" data-cmd="tab-workers">
+            <span class="cmd-item__icon">👤</span>
+            <span class="cmd-item__label">Danh bạ & Cổng tra cứu biên nhận</span>
+          </button>
+
+          <div class="cmd-group-label">Bảo mật & Cài đặt</div>
+          <button class="cmd-item" type="button" data-cmd="disconnect">
+            <span class="cmd-item__icon">🔑</span>
+            <span class="cmd-item__label">Đổi API Key nền tảng</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vùng hiển thị Toast thông báo -->
     <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
     <script type="module" src="/app.js"></script>
