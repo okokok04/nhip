@@ -4,6 +4,13 @@
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
+   0. CRITICAL VISIBILITY RESETS (Bắt buộc [hidden] có display: none !important)
+   -------------------------------------------------------------------------- */
+[hidden] {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
    1. CORE TOKENS & CSS VARIABLES
    -------------------------------------------------------------------------- */
 :root {
@@ -1285,6 +1292,10 @@ html.light .icon-moon { display: block; }
   animation: fadeIn 0.2s ease;
 }
 
+.drawer-backdrop[hidden] {
+  display: none !important;
+}
+
 .drawer {
   position: fixed;
   top: 0;
@@ -1296,6 +1307,10 @@ html.light .icon-moon { display: block; }
   display: flex;
   flex-direction: column;
   animation: slideDrawer 0.3s var(--ease);
+}
+
+.drawer[hidden] {
+  display: none !important;
 }
 
 @keyframes slideDrawer {
@@ -1383,7 +1398,7 @@ html.light .icon-moon { display: block; }
 .cmd-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(12px);
   z-index: 300;
   display: flex;
@@ -1391,6 +1406,28 @@ html.light .icon-moon { display: block; }
   justify-content: center;
   padding: 100px 20px 20px;
   animation: fadeIn 0.18s ease;
+}
+
+.cmd-backdrop[hidden] {
+  display: none !important;
+}
+
+.cmd-close {
+  background: none;
+  border: none;
+  color: var(--text-mute);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--r-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.cmd-close:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .cmd-dialog {
@@ -1638,3 +1675,43 @@ html.light .icon-moon { display: block; }
   .kpis { grid-template-columns: 1fr; }
   .specs-grid { grid-template-columns: 1fr; }
 }
+
+/* --------------------------------------------------------------------------
+   18. QUICK INTERACTIVE CHIPS (ezwallet & oneliq style)
+   -------------------------------------------------------------------------- */
+.chip-add,
+.chip-driver-select,
+.chip-lookup,
+.btn-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-sub);
+  padding: 4px 10px;
+  border-radius: var(--r-xs);
+  font-size: 12px;
+  font-family: var(--font);
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chip-add:hover,
+.chip-driver-select:hover,
+.chip-lookup:hover,
+.btn-chip:hover {
+  background: var(--surface-hover);
+  border-color: var(--arc-teal);
+  color: var(--arc-teal);
+  transform: translateY(-1px);
+}
+
+.chip-add:active,
+.chip-driver-select:active,
+.chip-lookup:active,
+.btn-chip:active {
+  transform: translateY(0);
+}
+

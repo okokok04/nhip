@@ -188,9 +188,12 @@
             </div>
 
             <div class="hero__actions">
-              <button class="btn btn--primary btn--glow" type="button" id="run-batcher">
+              <button class="btn btn--primary btn--glow" type="button" id="quick-demo-payout">
+                <span class="btn__label">⚡ Chi trả thử $25 (1-Click Demo)</span>
+              </button>
+              <button class="btn btn--secondary btn--glow" type="button" id="run-batcher">
                 <span class="btn__spinner" aria-hidden="true"></span>
-                <span class="btn__label">⚡ Gom lô hàng đợi</span>
+                <span class="btn__label">🚀 Gom lô & Xác nhận Arc L1</span>
               </button>
               <button class="btn btn--secondary" type="button" id="refresh">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -261,7 +264,14 @@
 
               <form class="form" id="payout-form">
                 <label class="field">
-                  <span class="field__label">Người nhận (Lao động / Tài xế)</span>
+                  <div class="field__row">
+                    <span class="field__label">Người nhận (Lao động / Tài xế)</span>
+                    <span class="field__quick-chips">
+                      <button type="button" class="chip-driver-select" data-worker="driver-001">An (001)</button>
+                      <button type="button" class="chip-driver-select" data-worker="driver-002">Bình (002)</button>
+                      <button type="button" class="chip-driver-select" data-worker="driver-003">Cường (003)</button>
+                    </span>
+                  </div>
                   <select class="field__input" id="worker-select" name="workerId" required>
                     <option value="">Đang tải danh bạ người nhận…</option>
                   </select>
@@ -622,12 +632,17 @@
 
               <form class="portal-lookup-form" id="worker-lookup-form">
                 <div class="field">
-                  <span class="field__label">Nhập mã nhân viên hoặc Worker ID</span>
+                  <span class="field__label">Chọn nhanh tài xế hoặc nhập mã:</span>
+                  <div class="quick-worker-chips" style="display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
+                    <button type="button" class="btn-chip chip-lookup" data-id="driver-001">Nguyễn Văn An (001)</button>
+                    <button type="button" class="btn-chip chip-lookup" data-id="driver-002">Trần Thị Bình (002)</button>
+                    <button type="button" class="btn-chip chip-lookup" data-id="driver-003">Lê Minh Cường (003)</button>
+                  </div>
                   <div class="field-with-btn">
                     <input
                       class="field__input field__input--mono"
                       id="worker-lookup-input"
-                      placeholder="Ví dụ: dr-101 hoặc w_..."
+                      placeholder="Ví dụ: driver-001 hoặc driver-002..."
                       required
                     />
                     <button class="btn btn--primary" type="submit">Tra cứu</button>
@@ -836,6 +851,7 @@
             spellcheck="false"
           />
           <kbd class="kbd">ESC</kbd>
+          <button class="cmd-close" id="cmd-close" type="button" aria-label="Đóng (ESC)" title="Đóng menu">✕</button>
         </div>
 
         <div class="cmd-list" id="cmd-list">

@@ -222,6 +222,8 @@ function initCommandPalette() {
 
   if (!backdrop || !input || !list) return;
 
+  backdrop.hidden = true;
+
   function openCmd() {
     backdrop.hidden = false;
     input.value = '';
@@ -234,6 +236,8 @@ function initCommandPalette() {
   }
 
   if (trigger) trigger.addEventListener('click', openCmd);
+  const closeBtn = $('cmd-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeCmd);
 
   backdrop.addEventListener('click', (e) => {
     if (e.target === backdrop) closeCmd();
@@ -663,6 +667,19 @@ function initWorkerPortal() {
       }
     });
   }
+
+  // Quick lookup chip buttons (ezwallet style)
+  document.querySelectorAll('.chip-lookup').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const extId = btn.dataset.id;
+      const input = $('worker-lookup-input');
+      const form = $('worker-lookup-form');
+      if (input && form) {
+        input.value = extId;
+        form.requestSubmit();
+      }
+    });
+  });
 }
 
 /* -------------------------------------------------------------------------
@@ -723,13 +740,13 @@ async function loadWorkers() {
 function paintOverview(ov) {
   // Bất biến B9: cấm hiện 0 khi chưa tải/lỗi. Nếu có ov hợp lệ thì hiện số thật.
   $('kpi-queued-count').textContent = (ov.queued?.count ?? 0).toLocaleString('vi-VN');
-  $('kpi-queued-amount').textContent = formatUsdc(ov.queued?.total_micro ?? '0');
+  $('kpi-queued-amount').textContent = formatUsdc(ov.queued?.totalMicro ?? ov.queued?.total_micro ?? '0');
 
   $('kpi-batched-count').textContent = (ov.batched?.count ?? 0).toLocaleString('vi-VN');
-  $('kpi-batched-amount').textContent = formatUsdc(ov.batched?.total_micro ?? '0');
+  $('kpi-batched-amount').textContent = formatUsdc(ov.batched?.totalMicro ?? ov.batched?.total_micro ?? '0');
 
   $('kpi-confirmed-count').textContent = (ov.confirmed?.count ?? 0).toLocaleString('vi-VN');
-  $('kpi-confirmed-amount').textContent = formatUsdc(ov.confirmed?.total_micro ?? '0');
+  $('kpi-confirmed-amount').textContent = formatUsdc(ov.confirmed?.totalMicro ?? ov.confirmed?.total_micro ?? '0');
 
   const total = (ov.queued?.count ?? 0) + (ov.batched?.count ?? 0) + (ov.confirmed?.count ?? 0) + (ov.failed?.count ?? 0);
   const settled = ov.confirmed?.count ?? 0;
@@ -908,6 +925,52 @@ function initPayoutForm() {
     });
   }
 
+  // Nút chi trả thử 1-click (Demo)
+  const quickDemoBtn = $('quick-demo-payout');
+  if (quickDemoBtn) {
+    quickDemoBtn.addEventListener('click', async () => {
+      quickDemoBtn.disabled = true;
+      quickDemoBtn.textContent = '⚡ Đang gửi $25…';
+
+      try {
+        const targetWorker = state.allWorkers[0];
+        if (!targetWorker) throw new Error('Chưa có dữ liệu danh bạ người nhận.');
+
+        const idempotencyKey = `demo_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        await api('/v1/payouts', {
+          method: 'POST',
+          headers: { 'Idempotency-Key': idempotencyKey },
+          body: {
+            workerId: targetWorker.id,
+            amount_micro: '25000000',
+            reference: 'Demo: Thù lao tức thì chuyến xe #ARC-DEMO',
+          },
+        });
+
+        toast(`⚡ Đã chi trả thử 25.00 USDC cho ${targetWorker.displayName || targetWorker.externalId}! Khoản tiền đã vào hàng đợi.`, 'success');
+        await refreshAll();
+      } catch (err) {
+        toast(`Lỗi chi trả thử: ${err.message}`, 'error');
+      } finally {
+        quickDemoBtn.disabled = false;
+        quickDemoBtn.textContent = '⚡ Chi trả thử $25 (1-Click Demo)';
+      }
+    });
+  }
+
+  // Quick driver selection chips
+  document.querySelectorAll('.chip-driver-select').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const extId = btn.dataset.worker;
+      const worker = state.workersByExternalId.get(extId);
+      if (worker && $('worker-select')) {
+        $('worker-select').value = worker.id;
+        $('amount-input').value = '25';
+        toast(`Đã chọn tài xế ${worker.displayName || worker.externalId} (Mặc định: $25 USDC)`, 'info');
+      }
+    });
+  });
+
   // Batch Runner
   const runBtn = $('run-batcher');
   if (runBtn) {
@@ -1068,17 +1131,29 @@ async function initApp() {
   initPayoutForm();
   initGate();
 
-  const savedKey = localStorage.getItem(STORAGE_KEY);
-  if (savedKey) {
-    state.apiKey = savedKey;
-    $('gate').hidden = true;
-    $('shell').hidden = false;
-    $('platform-pill').textContent = 'plat_demo';
-    await refreshAll();
-  } else {
-    $('gate').hidden = false;
-    $('shell').hidden = true;
+  // Mặc định luôn nạp môi trường Demo Sandbox (Giao Hàng Nhanh) để người dùng trải nghiệm tức thì
+  const savedKey = localStorage.getItem(STORAGE_KEY) || 'nhip_sk_seed_00000000000000000000000000000001';
+  state.apiKey = savedKey;
+
+  if ($('gate')) $('gate').hidden = true;
+  if ($('shell')) $('shell').hidden = false;
+
+  const pill = $('platform-pill');
+  if (pill) {
+    pill.textContent = savedKey.includes('seed') ? 'Giao Hàng Nhanh (Demo Sandbox)' : 'Live Enterprise';
   }
+
+  await refreshAll();
+
+  // Tự động nạp tài xế mẫu trong Cổng Tra Cứu Tài Xế (học ezwallet.cash)
+  setTimeout(() => {
+    const lookupInput = $('worker-lookup-input');
+    const lookupForm = $('worker-lookup-form');
+    if (lookupInput && lookupForm) {
+      lookupInput.value = 'driver-001';
+      lookupForm.requestSubmit();
+    }
+  }, 600);
 
   checkHealth();
   state.healthTimer = setInterval(checkHealth, 15000);
