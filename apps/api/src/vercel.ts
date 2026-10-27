@@ -1,9 +1,9 @@
 import { getRequestListener } from '@hono/node-server';
 
-import { createApp } from '../apps/api/src/app.ts';
-import { migrate } from '../packages/db/src/migrate.ts';
-import { PgliteDatabase } from '../packages/db/src/pglite.ts';
-import { seedDemo } from '../packages/db/src/seed.ts';
+import { createApp } from './app.ts';
+import { migrate } from '../../../packages/db/src/migrate.ts';
+import { PgliteDatabase } from '../../../packages/db/src/pglite.ts';
+import { seedDemo } from '../../../packages/db/src/seed.ts';
 
 let appPromise: Promise<ReturnType<typeof createApp>> | null = null;
 

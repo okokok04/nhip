@@ -9,6 +9,7 @@
     "#core/*": "./packages/core/src/*.ts"
   },
   "scripts": {
+    "build": "esbuild apps/api/src/vercel.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/index.js --external:@electric-sql/pglite",
     "dev": "node --watch apps/api/src/server.ts",
     "start": "node apps/api/src/server.ts",
     "seed": "node scripts/seed.ts",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
   }
 }

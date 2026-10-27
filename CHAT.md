@@ -489,5 +489,40 @@ Từ nay mọi thay đổi giao diện phải đối chiếu với `DESIGN.md` t
 - Đưa các tiêu chí kiểm tra độ tương phản WCAG AA $\ge 4.5:1$, kiểm tra rò rỉ float/number, tabular-nums cho cột số tiền, và kiểm tra phím tắt `Ctrl+K`/`Escape` vào checklist nghiệm thu.
 - Đối chiếu nghiêm ngặt mọi diff trong `apps/web/` với `DESIGN.md` trước khi duyệt.
 
+---
 
+## msg-0027 · 2026-10-27T15:45+07:00 · web-dev → leader · HANDOFF · re:Vercel-Deployment
 
+Báo cáo kết quả triển khai Vercel theo yêu cầu của chủ dự án:
+
+1. **Cấu hình & Đóng gói Serverless:**
+   - Tạo `apps/api/src/vercel.ts` làm entrypoint Vercel Serverless Function và bổ sung script `npm run build` dùng `esbuild` đóng gói thành `api/index.js` (190.3KB, ESM thuần, Node 22).
+   - Tối ưu `packages/db/src/migrate.ts` hỗ trợ embedded migrations fallback, đảm bảo PGlite khởi tạo và chạy migration/seed hoàn hảo trong môi trường serverless không phụ thuộc filesystem bên ngoài.
+   - Cấu hình `vercel.json` phục vụ static assets từ `apps/web/public`, rewrite `/v1/*` và `/health` về `/api`.
+
+2. **Kết quả triển khai Production:**
+   - Scope / Team: `le-van-manh-s-projects`
+   - Project: `nhip`
+   - Production URL: `https://nhip-three.vercel.app` (Alias chính)
+   - Deployment URL: `https://nhip-2dxtcvejj-le-van-manh-s-projects.vercel.app`
+
+3. **Bằng chứng kiểm thử thực tế (Reality-First Verification):**
+   - `GET https://nhip-three.vercel.app/health` → `200 OK {"status":"ok","db":"ok","time":"..."}`
+   - `GET https://nhip-three.vercel.app/v1/overview` (Bearer seed key) → `200 OK` (trả đúng thống kê 12 queued, 40 confirmed, 5 workers, 1 recent batch).
+   - `GET https://nhip-three.vercel.app/` → `200 OK` (41.299 bytes HTML).
+   - Đã chạy browser subagent kiểm tra trực tiếp giao diện trên production: render mượt mà bảng màu Arc Horizon Aurora, Dark/Light mode, Command Palette (`Ctrl+K`), Batch Drawer, và bộ 4 tab nghiệp vụ.
+   - Toàn bộ 174 test suite và 35 team-check giữ vững kết quả xanh 100%.
+
+Bàn giao lại cho Leader nghiệm thu.
+
+---
+
+## msg-0028 · 2026-10-27T15:46+07:00 · leader → all · DECIDE · re:Vercel-Deployment-Complete
+
+Chấp thuận nghiệm thu toàn diện đợt triển khai Vercel.
+
+Dự án **Nhịp** hiện đã chính thức online trên production tại team của chủ dự án:
+- URL ứng dụng: `https://nhip-three.vercel.app`
+- Vercel Dashboard: `https://vercel.com/le-van-manh-s-projects/nhip`
+
+Tất cả các tiêu chí bất biến từ B1 đến B10 được bảo toàn nguyên vẹn. Hệ thống sẵn sàng cho vận hành và demo.
